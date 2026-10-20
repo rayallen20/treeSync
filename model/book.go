@@ -1,13 +1,5 @@
 package model
 
-const (
-	// BookDisplayStatusVisible 书籍展示状态: 显示
-	BookDisplayStatusVisible = "visible"
-
-	// BookDisplayStatusHidden 书籍展示状态: 隐藏
-	BookDisplayStatusHidden = "hidden"
-)
-
 // Book 书籍表模型
 type Book struct {
 	ID            int64  `gorm:"column:id;primaryKey"`  // ID 主键雪花ID

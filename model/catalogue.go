@@ -1,19 +1,5 @@
 package model
 
-const (
-	// CatalogueTypeFolder 节点类型: 文件夹
-	CatalogueTypeFolder = "folder"
-
-	// CatalogueTypeFile 节点类型: 文件
-	CatalogueTypeFile = "file"
-
-	// CatalogueDisplayStatusVisible 章节展示状态: 显示
-	CatalogueDisplayStatusVisible = "visible"
-
-	// CatalogueDisplayStatusHidden 章节展示状态: 隐藏
-	CatalogueDisplayStatusHidden = "hidden"
-)
-
 // Catalogue 目录表模型
 type Catalogue struct {
 	ID            int64  `gorm:"column:id;primaryKey"`  // ID 主键雪花ID
