@@ -1,14 +1,10 @@
 package syncer
 
 import (
-	"errors"
 	"treeSync/biz/catalogue"
 
 	"gorm.io/gorm"
 )
-
-// ErrBookNotFound 哨兵错误,表示指定的书籍不存在
-var ErrBookNotFound = errors.New("book不存在")
 
 // Params 本结构体用于表示目录树同步器的参数
 type Params struct {
@@ -51,11 +47,6 @@ func plan(query *gorm.DB, bookID int64, newRoot *catalogue.Catalogue, lock bool)
 // apply 本函数用于根据给定的变更集执行数据库写入操作,若执行成功则返回nil,否则返回错误
 func apply(tx *gorm.DB, changeSet *catalogue.ChangeSet) error {
 	return nil
-}
-
-// countTree 本函数用于统计新树的规模,返回新树的文章数量和目录数量
-func countTree(root *catalogue.Catalogue) (articles int, folders int) {
-	return 0, 0
 }
 
 // fillReport 本函数用于根据给定的变更集填充报告,将变更集中的新增/删除行和更新行明细写入报告中

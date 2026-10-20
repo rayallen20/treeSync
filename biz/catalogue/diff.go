@@ -7,4 +7,4 @@ func insertSubtree(node *Catalogue, parentID int64, bookID int64, displayPrefix 
 
 // deleteSubtree 本函数用于在旧树中将以node为根的子树收集进变更集的删除集(目录id与文章id分别收集),
 // 并按 displayPrefix 拼出 RemovedLines(file 节点的文件名从 article.path 末段取回)
-func deleteSubtree(n *Catalogue, displayPrefix string, changeSet *ChangeSet) {}
+func deleteSubtree(node *Catalogue, displayPrefix string, changeSet *ChangeSet) {}

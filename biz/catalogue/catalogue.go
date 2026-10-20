@@ -13,12 +13,13 @@ const (
 
 // Catalogue 目录业务结构体
 type Catalogue struct {
-	ID       int64            // ID 目录ID
-	Name     string           // Name 章节名称(若节点为根节点,则该节点的名称即为书籍名称,即所属 book.Book 结构体的Title字段)
-	Type     string           // Type 章节类型
-	RelPath  string           // RelPath 章节相对路径(相对于书籍根目录的路径,仅新建树时用到该字段)
-	Article  *article.Article // Article 章节对应文章 (仅Type为file时,该字段才有值)
-	Children []*Catalogue     // Children 子章节列表
+	ID       int64                   // ID 目录ID
+	Name     string                  // Name 章节名称(若节点为根节点,则该节点的名称即为书籍名称,即所属 book.Book 结构体的Title字段)
+	Type     string                  // Type 章节类型
+	RelPath  string                  // RelPath 章节相对路径(相对于书籍根目录的路径,仅新建树时用到该字段)
+	Article  *article.Article        // Article 章节对应文章 (仅Type为file时,该字段才有值)
+	Children []*Catalogue            // Children 子章节列表
+	byKey    map[childKey]*Catalogue // byKey 子节点索引,和 Children 字段同步维护
 }
 
 // newCatalogue 本函数用于根据给定的节点名称和类型创建一个 Catalogue 实例
