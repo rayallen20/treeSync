@@ -2,6 +2,8 @@ package biz
 
 import (
 	"errors"
+	"strings"
+	"treeSync/conf"
 	"treeSync/model"
 	"treeSync/reporter"
 
@@ -19,6 +21,12 @@ type Book struct {
 
 // Build 本方法用于根据给定的书籍ID和目录路径构建书籍目录
 func (b *Book) Build(id int64, path string) (*reporter.Report, error) {
+	confInstance := conf.Get()
+	isInLocation := strings.HasPrefix(path, confInstance.Storage.RootDir)
+	if !isInLocation {
+		return nil, errors.New("给定的路径不在存储根目录下")
+	}
+
 	orm := &model.Book{}
 	err := orm.GetByID(id)
 	if err != nil {
