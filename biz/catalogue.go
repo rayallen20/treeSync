@@ -26,32 +26,8 @@ type Catalogue struct {
 	Article       *Article              // Article 章节对应的文章信息(若节点为非叶节点,则该字段为nil)
 }
 
-// Build 本方法用于根据给定的
-// - 书籍ID
-// - 书籍标题
-// - 目录路径集合
-// 构建书籍目录
-func (c *Catalogue) Build(bookID int64, bookTitle, rootPath string) (*reporter.Report, error) {
-	orm := &model.Catalogue{}
-	orms, err := orm.FindByBookID(bookID)
-	if err != nil {
-		return nil, errors.New("获取书籍目录失败: " + err.Error())
-	}
-
-	if len(orms) == 0 {
-		report, err := c.buildFromPath(bookID, bookTitle, rootPath)
-		if err != nil {
-			return nil, errors.New("构建书籍目录失败: " + err.Error())
-		}
-
-		return report, nil
-	}
-
-	return nil, nil
-}
-
 // buildFromPath 本方法用于根据给定的目录路径集合构建书籍目录
-func (c *Catalogue) buildFromPath(bookID int64, bookTitle, rootPath string) (*reporter.Report, error) {
+func (c *Catalogue) buildFromPath(bookID int64, bookTitle, rootPath string) error {
 	c.ID = snowflake.Next()
 	c.Name = bookTitle
 	c.Type = enum.TypeFolder
@@ -60,7 +36,7 @@ func (c *Catalogue) buildFromPath(bookID int64, bookTitle, rootPath string) (*re
 
 	subPaths, err := scan.Dir(rootPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	for _, subPath := range subPaths {
@@ -72,31 +48,11 @@ func (c *Catalogue) buildFromPath(bookID int64, bookTitle, rootPath string) (*re
 		parts := strings.Split(subPath, "/")
 		err = c.insertCatalogue(parts, subPath, rootPath)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	catalogueOrms, articleOrms := c.flatten()
-	orm := &model.Catalogue{}
-	err = orm.CreateCatalogueTree(catalogueOrms, articleOrms)
-	if err != nil {
-		return nil, errors.New("落盘书籍目录失败: " + err.Error())
-	}
-
-	report := &reporter.Report{
-		CatalogueReport: &reporter.CatalogueReport{
-			AddItemQuantity:    len(catalogueOrms),
-			DeleteItemQuantity: 0,
-			UpdateItemQuantity: 0,
-		},
-		ArticleReport: &reporter.ArticleReport{
-			AddItemQuantity:    len(articleOrms),
-			DeleteItemQuantity: 0,
-			UpdateItemQuantity: 0,
-		},
-	}
-
-	return report, nil
+	return nil
 }
 
 // insertCatalogue 本方法用于在当前节点下根据给定路径递归插入子节点
@@ -138,7 +94,11 @@ func (c *Catalogue) insertCatalogue(parts []string, articlePath, rootPath string
 		DisplayStatus: enum.DisplayHidden,
 		BookID:        c.BookID,
 	}
+
 	if catalogueType == enum.TypeFile {
+		// 叶子节点不需要简介(因为直接显示文章了)
+		child.Intro = ""
+
 		child.Article = &Article{
 			ID:   snowflake.Next(),
 			Path: rootPath + "/" + articlePath,
@@ -150,6 +110,29 @@ func (c *Catalogue) insertCatalogue(parts []string, articlePath, rootPath string
 
 	// 递归插入子节点
 	return child.insertCatalogue(parts[1:], articlePath, rootPath)
+}
+
+// saveTree 本方法用于将当前节点及其所有子节点展开为一个平面列表,并将该列表及其对应的(叶子节点的)文章列表落盘到数据库中
+func (c *Catalogue) saveTree() (*reporter.Report, error) {
+	catalogueOrms, articleOrms := c.flatten()
+	orm := &model.Catalogue{}
+	err := orm.CreateCatalogueTree(catalogueOrms, articleOrms)
+	if err != nil {
+		return nil, errors.New("落盘书籍目录失败: " + err.Error())
+	}
+
+	report := &reporter.Report{
+		CatalogueReport: &reporter.CatalogueReport{
+			AddItemQuantity:    len(catalogueOrms),
+			DeleteItemQuantity: 0,
+		},
+		ArticleReport: &reporter.ArticleReport{
+			AddItemQuantity:    len(articleOrms),
+			DeleteItemQuantity: 0,
+		},
+	}
+
+	return report, nil
 }
 
 // flatten 本方法用于将当前节点及其所有子节点展开为一个平面列表,并返回该列表及其对应的(叶子节点的)文章列表
@@ -216,4 +199,105 @@ func (c *Catalogue) printChildren(prefix string) {
 		fmt.Printf("%s%s%s (%s) %#v\n", prefix, branch, child.Name, child.Type, child.Article)
 		child.printChildren(nextPrefix)
 	}
+}
+
+// buildFromRows 本方法用于根据给定的目录ORM集合构建书籍目录
+func (c *Catalogue) buildFromRows(rows []*model.Catalogue) error {
+	if len(rows) == 0 {
+		return errors.New("目录ORM集合为空")
+	}
+
+	catalogues := make(map[int64]*Catalogue, len(rows))
+
+	// 遍历ORM集合 将ORM转换为业务对象(也将叶子节点的文章ORM转换为业务对象)
+	for _, row := range rows {
+		if row == nil {
+			return errors.New("目录ORM集合中存在nil")
+		}
+
+		_, exists := catalogues[row.ID]
+		if exists {
+			return errors.New(fmt.Sprintf("目录ORM集合中存在重复的ID: %d", row.ID))
+		}
+
+		catalogue := &Catalogue{}
+		catalogue.fillByORM(row)
+
+		catalogues[row.ID] = catalogue
+	}
+
+	// 遍历ORM集合 将业务对象组织为树形结构
+	var root *Catalogue
+
+	for _, row := range rows {
+		catalogue := catalogues[row.ID]
+
+		// 处理根节点
+		if row.ParentID == 0 {
+			if root != nil {
+				return errors.New("目录ORM集合中存在多个根节点")
+			}
+
+			root = catalogue
+			continue
+		}
+
+		// 处理非根节点
+		parent, exists := catalogues[row.ParentID]
+		if !exists {
+			msg := fmt.Sprintf("目录 %d 的父节点 %d 不存在", row.ID, row.ParentID)
+			return errors.New(msg)
+		}
+
+		_, exists = parent.index[catalogue.Name]
+		if exists {
+			msg := fmt.Sprintf("父目录 %d 下存在同名节点 %d", parent.ID, catalogue.ID)
+			return errors.New(msg)
+		}
+
+		parent.Children = append(parent.Children, catalogue)
+		parent.index[catalogue.Name] = catalogue
+	}
+
+	if root == nil {
+		return errors.New("目录ORM集合中不存在根节点")
+	}
+
+	// 检查是否存在从根节点出发不可达的节点
+	isReachable := c.isReachable(root, len(rows))
+	if !isReachable {
+		return errors.New("目录ORM集合中存在不可达的节点")
+	}
+
+	// 检查通过后 将根节点赋值给当前接收者
+	*c = *root
+	return nil
+}
+
+// fillByORM 本方法用于根据给定的目录ORM对象填充目录业务结构体
+func (c *Catalogue) fillByORM(orm *model.Catalogue) {
+	c.ID = orm.ID
+	c.Sort = orm.Sort
+	c.Name = orm.Name
+	c.Intro = orm.Intro
+	c.Type = orm.Type
+	c.DisplayStatus = orm.DisplayStatus
+	c.BookID = orm.BookID
+	c.index = make(map[string]*Catalogue)
+
+	if orm.Article != nil {
+		c.Article = &Article{}
+		c.Article.fillByOrm(orm.Article)
+	}
+}
+
+// isReachable 本方法用于判断给定的树中的节点是否都可以从根节点出发到达,若存在不可达的节点则返回false,否则返回true
+func (c *Catalogue) isReachable(root *Catalogue, catalogueQuantity int) bool {
+	reachable := make([]*Catalogue, 0, catalogueQuantity)
+	reachable = append(reachable, root)
+	for i := 0; i < len(reachable); i++ {
+		reachable = append(reachable, reachable[i].Children...)
+	}
+
+	return len(reachable) == catalogueQuantity
 }

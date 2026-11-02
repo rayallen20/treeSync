@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,9 @@ func (w *walker) visit(path string, d fs.DirEntry, err error) error {
 
 	// 根目录不参与规则判定
 	if path == w.root {
+		if !d.IsDir() {
+			return fmt.Errorf("根目录必须是一个目录,而不是文件: %s", path)
+		}
 		return nil
 	}
 

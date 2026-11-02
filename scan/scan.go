@@ -10,6 +10,11 @@ import (
 // 1. 在递归过程中,会跳过隐藏项
 // 2. 在递归过程中,会跳过符号链接
 func Dir(dir string) ([]string, error) {
+	if dir == "" {
+		return nil, fmt.Errorf("目录路径不能为空")
+	}
+	dir = filepath.Clean(dir)
+
 	w := &walker{
 		root: dir,
 	}

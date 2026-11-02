@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="treeSync 目录树增量同步参考实现：CatalogueSyncer 持有原树与新树，负责 ID 对齐、增删比较，并协调 model 层事务执行。">
+  <title>目录树增量同步 · CatalogueSyncer 设计与实现 | treeSync</title>
+  <style>
+:root { --ink:#19352e; --text:#334b46; --muted:#61746d; --green:#17694f; --green-soft:#e6f2eb; --line:#dce4df; --paper:#fffefa; --bg:#f4f5f0; --red:#a33d43; --red-soft:#fbecef; --blue:#355a9a; --blue-soft:#eaf0fb; --code:#17251f; --radius:18px; }
+*{box-sizing:border-box} html{scroll-behavior:smooth;scroll-padding-top:40px} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.85;-webkit-font-smoothing:antialiased} a{color:var(--green);text-decoration:none} a:hover{text-decoration:underline} button{font:inherit;cursor:pointer} button:focus-visible,a:focus-visible,pre:focus-visible{outline:3px solid #b5d695;outline-offset:4px} ::selection{background:#c9e2cf} p{margin:0 0 16px} h1,h2,h3{color:var(--ink);line-height:1.4;letter-spacing:-.025em} h1{font-size:clamp(34px,4.4vw,56px);font-weight:720;margin:15px 0 23px} h2{font-size:27px;margin:0 0 15px} h3{font-size:18px;margin:0 0 9px} strong{font-weight:650;color:var(--ink)} code,pre,.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace} p code,li>code,td code,.inline-code{font-size:.9em;padding:2px 6px;border-radius:5px;background:#eaf0e8;color:#285545;overflow-wrap:anywhere} .progress-track{position:fixed;top:0;left:0;right:0;height:3px;z-index:50;background:transparent} .progress-track span{display:block;height:100%;width:0;background:var(--green)} .layout{max-width:1440px;margin:auto;display:grid;grid-template-columns:235px minmax(0,1fr);gap:54px;padding:0 48px}.sidebar{position:sticky;top:0;height:100vh;padding:49px 0 30px;display:flex;flex-direction:column}.brand{display:flex;align-items:center;gap:11px;color:var(--ink);font-size:19px;letter-spacing:-.025em;font-weight:750}.brand-mark{width:35px;height:35px;border-radius:10px;background:var(--green);display:grid;place-items:center;color:white}.sidebar-label{color:var(--muted);font-size:11px;letter-spacing:.13em;text-transform:uppercase;margin:35px 0 15px}.sidebar nav{display:flex;flex-direction:column;gap:5px}.sidebar nav a{display:flex;align-items:center;gap:12px;color:var(--muted);padding:8px 12px;border-radius:8px;font-size:14px;transition:background .15s,color .15s}.sidebar nav a span{font-size:11px;font-family:monospace;opacity:.65}.sidebar nav a.active{background:var(--green-soft);color:var(--green);font-weight:650}.sidebar nav a:hover{background:#eaf0e8;text-decoration:none}.sidebar-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:18px;font-size:12px;color:var(--muted)} .sidebar-foot code{font-size:11px}.main{min-width:0;padding-bottom:40px}.hero{padding:63px 0 40px;border-bottom:1px solid var(--line);position:relative}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.16em;color:var(--green);text-transform:uppercase}.hero-description{max-width:650px;font-size:17px;line-height:1.9;color:var(--muted)}.hero-meta{display:flex;gap:9px;flex-wrap:wrap;margin-top:26px}.pill{font-size:11px;color:var(--green);background:var(--green-soft);border:1px solid #d7e5d9;border-radius:99px;padding:3px 10px}.print-button{position:absolute;right:0;top:64px;border:1px solid var(--line);background:var(--paper);border-radius:9px;padding:6px 13px;font-size:12px;color:var(--muted)} section{padding-top:52px;scroll-margin-top:26px}.section-top{display:flex;align-items:center;gap:12px;margin-bottom:16px}.section-index{font:12px monospace;border:1px solid #cbd8cb;color:var(--green);border-radius:99px;width:31px;height:31px;display:grid;place-items:center}.section-top h2{margin:0}.section-intro{max-width:790px;color:var(--muted)}.card{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:24px}.callout{padding:17px 20px;background:#eaf2e8;border-left:3px solid var(--green);border-radius:0 10px 10px 0;font-size:14px;margin:23px 0}.callout p:last-child{margin-bottom:0}.callout.neutral{background:#f0f1eb;border-left-color:#a5aa7e}.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:13px;background:var(--paper)}table{border-collapse:collapse;width:100%;font-size:14px}th,td{padding:15px 18px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}th{background:#edf1e9;color:#435e50;font-size:12px;font-weight:650;white-space:nowrap}tr:last-child td{border-bottom:0}.status{font-size:11px;border-radius:99px;padding:3px 8px;display:inline-block;white-space:nowrap}.status.add{color:var(--green);background:var(--green-soft)}.status.delete{color:var(--red);background:var(--red-soft)}.status.keep{color:var(--blue);background:var(--blue-soft)}.rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-top:18px}.rule-grid .card{padding:20px}.rule-grid p{font-size:13px;color:var(--muted);margin:0}.formula{font:13px "SFMono-Regular",Consolas,monospace;padding:13px 16px;background:#edf2e9;border:1px dashed #b5c9af;border-radius:10px;text-align:center;color:var(--green);margin:20px 0}.scenario-panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);overflow:hidden;margin-top:23px}.scenario-toolbar{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}.scenario-tabs,.alignment-switch{display:flex;gap:4px;flex-wrap:wrap}.scenario-tabs button{border:0;background:transparent;padding:7px 10px;border-radius:7px;font-size:12px;color:var(--muted)}.scenario-tabs button[aria-selected=true]{background:var(--green);color:white}.alignment-switch{background:#edf1ea;padding:3px;border-radius:7px}.alignment-switch button{border:0;background:transparent;color:var(--muted);font-size:11px;padding:4px 8px;border-radius:5px}.alignment-switch button[aria-pressed=true]{background:white;color:var(--green);box-shadow:0 1px 3px #10281a10}.scenario-description{padding:18px 23px 0;font-size:13px;color:var(--muted);margin:0}.tree-pair{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:20px 14px}.tree-pane{padding:0 9px;min-width:0}.tree-pane+.tree-pane{border-left:1px dashed var(--line)}.tree-pane-heading{display:flex;justify-content:space-between;align-items:baseline;margin:0 4px 16px;gap:10px;font-size:13px;color:var(--ink);font-weight:650}.tree-pane-heading small{font-size:10px;font-weight:400;color:var(--muted);letter-spacing:.02em}.tree-root,.tree-root ul{list-style:none;margin:0;padding-left:19px}.tree-root{padding-left:0}.tree-root ul{margin-left:11px;border-left:1px solid #d2dbd3}.tree-root li{position:relative;margin-top:8px}.tree-root ul>li:before{position:absolute;content:"";width:13px;left:-19px;top:24px;border-top:1px solid #d2dbd3}.tree-node{display:flex;gap:8px;align-items:flex-start;padding:9px 9px;border-radius:9px;border:1px solid transparent;min-width:0}.state-keep{background:#f0f4fb;border-color:#e1e8f5}.state-add{background:var(--green-soft);border-color:#cce1d2}.state-delete{background:var(--red-soft);border-color:#f0d9dd}.node-symbol{font-size:18px;color:#6a8271;line-height:1.3;flex-shrink:0}.node-body{min-width:0;flex:1}.node-name{font-size:12px;line-height:1.5;display:block;overflow-wrap:anywhere;color:var(--ink);font-weight:550}.node-meta{font:10px/1.7 "SFMono-Regular",Consolas,monospace;color:var(--muted);display:block;margin-top:4px;overflow-wrap:anywhere}.article-id{display:inline-block;margin-left:3px;white-space:nowrap}.node-badge{font-size:9px;border-radius:4px;padding:1px 4px;flex-shrink:0;margin-top:1px}.state-keep .node-badge{color:var(--blue);background:#e0e8f8}.state-add .node-badge{color:var(--green);background:#cde5d7}.state-delete .node-badge{color:var(--red);background:#f2d7dc}.legend{display:flex;gap:15px;flex-wrap:wrap;padding:0 24px 20px;font-size:11px;color:var(--muted)}.legend span:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:var(--blue)}.legend .legend-add:before{background:var(--green)}.legend .legend-delete:before{background:var(--red)}.plan-preview{background:#f6f7f2;border-top:1px solid var(--line);padding:20px 23px}.plan-title{font-size:12px;color:var(--ink);font-weight:650;margin-bottom:12px}.plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.plan-item{background:white;border:1px solid #e3e8df;border-radius:8px;padding:10px 12px;min-width:0}.plan-key{font:10px "SFMono-Regular",Consolas,monospace;color:var(--muted);display:block;margin-bottom:5px}.plan-value{font:11px/1.8 "SFMono-Regular",Consolas,monospace;color:var(--ink);display:block;overflow-wrap:anywhere}.plan-note{font-size:12px;color:var(--green);margin:13px 0 0}.report-preview{display:flex;gap:16px;flex-wrap:wrap;margin-top:13px;font-size:11px;color:var(--muted)}.report-preview b{font-weight:650;color:var(--ink);font-family:monospace}.flow-diagram{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:24px 0}.flow-step{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:18px 15px}.flow-step:not(:last-child):after{content:"→";position:absolute;right:-14px;top:37px;color:#94ab96;z-index:1;background:var(--bg);line-height:1}.flow-step small{font:10px monospace;color:var(--green);display:block;margin-bottom:9px}.flow-step strong{font-size:13px;display:block;margin-bottom:5px}.flow-step p{font-size:11px;line-height:1.8;color:var(--muted);margin:0}.split-explanation{display:grid;grid-template-columns:1fr 1fr;gap:18px}.split-explanation p{font-size:13px;color:var(--muted);margin:0}.mini-label{font:10px monospace;color:var(--green);letter-spacing:.08em;margin-bottom:8px}.code-section{margin-top:31px}.code-section>h3{margin-bottom:9px}.code-section>p{font-size:14px;color:var(--muted)}.code-window{margin:18px 0 24px;border:1px solid #293b31;border-radius:13px;overflow:hidden;background:var(--code);box-shadow:0 7px 22px #203b2607}.code-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 16px;background:#213329;border-bottom:1px solid #35473b;color:#d4e2d5;font:11px/1.5 "SFMono-Regular",Consolas,monospace}.code-toolbar>span{display:flex;align-items:center;gap:8px}.code-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#8ebf8b}.code-actions{display:flex;align-items:center;gap:15px;flex-shrink:0}.line-count{color:#8fa492;font-size:10px}.copy-button{border:1px solid #516655;background:transparent;border-radius:5px;color:#d1e2cf;font-size:10px;line-height:1.6;padding:3px 9px}.copy-button:hover{background:#304837}pre{margin:0;overflow:auto;max-width:100%;tab-size:4;overscroll-behavior-x:contain}pre code{display:block;white-space:normal;font-size:12px;line-height:1.85;color:#e5ece0;padding:17px 0}.code-line{position:relative;display:block;white-space:pre;min-height:1.85em;padding:0 22px 0 62px}.code-line:before{content:attr(data-line);position:absolute;left:15px;width:28px;text-align:right;color:#718573;font-size:10px;line-height:2.22;user-select:none}.tok-keyword{color:#b7d6fa}.tok-string{color:#dceba3}.tok-comment{color:#91aa95}.tok-number{color:#efc49a}.detail-box{border:1px solid var(--line);border-radius:12px;background:var(--paper);padding:0 18px;margin-top:17px}details summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);padding:15px 0}details[open] summary{border-bottom:1px solid var(--line);margin-bottom:15px}details p,details li{font-size:13px}.detail-box ul{padding-left:20px;margin-bottom:18px}.transaction-box{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:25px;margin:22px 0}.tx-boundary{font:11px monospace;color:var(--green);display:flex;justify-content:space-between;align-items:center;padding-bottom:17px;border-bottom:1px dashed #cad8cb}.tx-list{list-style:none;padding:7px 0 0;margin:0;counter-reset:tx}.tx-list li{position:relative;padding:15px 0 15px 49px;counter-increment:tx;border-bottom:1px solid #edf0e9;font-size:13px}.tx-list li:last-child{border-bottom:0}.tx-list li:before{content:counter(tx,decimal-leading-zero);position:absolute;left:0;top:19px;font:11px monospace;width:29px;height:29px;border:1px solid #d8e3d7;background:#f3f7f0;border-radius:9px;display:grid;place-items:center;color:var(--green)}.tx-list small{display:block;color:var(--muted);font-size:12px;margin-top:3px}.tx-commit{margin-top:15px;display:flex;justify-content:space-between;gap:14px;font-size:12px}.tx-success{color:var(--green)}.tx-fail{color:var(--red)}.boundary-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.boundary-grid .card{padding:20px}.boundary-grid h3{font-size:15px}.boundary-grid p{font-size:13px;color:var(--muted);margin:0}.source-links{display:flex;gap:12px 22px;flex-wrap:wrap;font-size:12px;margin:22px 0 0;padding:0;list-style:none}.footer{margin-top:45px;padding:23px 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:15px;font-size:11px;color:var(--muted)}.footer code{font-size:10px}.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.mobile-brand{display:none} noscript p{padding:15px;background:#f7eee0;border-radius:9px;font-size:13px}
+@media(min-width:1500px){.layout{gap:68px;grid-template-columns:250px minmax(0,1fr)}}
+@media(max-width:1100px){.layout{padding:0 28px;grid-template-columns:190px minmax(0,1fr);gap:30px}.tree-pair{grid-template-columns:1fr;gap:25px}.tree-pane+.tree-pane{border-left:0;border-top:1px dashed var(--line);padding-top:21px}.flow-diagram{grid-template-columns:1fr 1fr}.flow-step:nth-child(2):after{display:none}.print-button{top:40px}.hero{padding-top:40px}.line-count{display:none}}
+@media(max-width:760px){html{scroll-padding-top:20px}.layout{display:block;padding:0 20px}.sidebar{display:none}.mobile-brand{display:flex;padding-top:24px;font-size:15px}.mobile-brand .brand-mark{width:29px;height:29px;border-radius:8px}.hero{padding-top:26px}.hero h1{font-size:36px;max-width:500px}.hero-description{font-size:15px}.print-button{position:static;margin-top:19px}.hero-meta{margin-top:20px}section{padding-top:38px}.section-top h2{font-size:23px}.rule-grid,.split-explanation,.boundary-grid{grid-template-columns:1fr}.plan-grid{grid-template-columns:1fr}.scenario-toolbar{padding:14px}.scenario-tabs button{font-size:11px;padding:6px 8px}.alignment-switch button{font-size:10px}.scenario-description{padding:17px 17px 0}.tree-pair{padding:18px 9px}.plan-preview{padding:18px 17px}.flow-diagram{gap:12px}.flow-step{padding:16px 13px}.flow-step:not(:last-child):after{right:-11px}.flow-step:nth-child(2):after{display:none}.code-toolbar{padding:11px 12px;font-size:10px;gap:8px}.code-actions{gap:0}.copy-button{font-size:10px;white-space:nowrap}.code-line{padding-left:48px;padding-right:16px}.code-line:before{left:8px;width:25px}pre code{font-size:11px}.card{padding:20px}th,td{padding:12px 13px}.table-scroll table{min-width:530px}.transaction-box{padding:20px}.tx-commit,.footer{flex-direction:column;gap:6px}.footer{margin-top:35px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+@media print{body{background:white;font-size:11px;color:#222}.layout{display:block;max-width:none;padding:0}.sidebar,.progress-track,.print-button,.copy-button,.scenario-tabs,.alignment-switch,.mobile-brand{display:none!important}.hero{padding:0 0 20px}h1{font-size:30px;margin:10px 0 15px}h2{font-size:21px}section{padding-top:26px}.hero-description{font-size:13px}.pill{font-size:9px}.tree-pair{grid-template-columns:1fr 1fr}.tree-pane+.tree-pane{border-left:1px dashed #ccc;border-top:0;padding-top:0}.flow-diagram{grid-template-columns:repeat(4,1fr)}.code-window{box-shadow:none;background:#f8faf7;border-color:#c7d1c4;break-inside:auto}.code-toolbar{background:#ecf1e9;color:#233d2b;border-color:#c7d1c4}.code-toolbar .code-dot,.line-count{display:none}.code-line{white-space:pre-wrap;overflow-wrap:anywhere;padding-left:40px;break-inside:avoid}.code-line:before{left:4px;color:#637362}.tok-keyword{color:#305489}.tok-string{color:#426c29}.tok-comment{color:#667d65}.tok-number{color:#8b6138}pre code{color:#243a2a;font-size:9px}pre{overflow:visible}.card,.rule-grid,.boundary-grid,.transaction-box,.scenario-panel{break-inside:avoid}a{color:inherit}details{display:block}.footer{margin-top:25px}h2,h3,.code-toolbar{break-after:avoid}.section-intro{font-size:12px}.plan-grid{grid-template-columns:1fr 1fr}}
+
+.syncer-diagram{margin:23px 0;break-inside:avoid}.syncer-object{border:1px solid #b9cebc;background:var(--paper);border-radius:16px;overflow:hidden}.syncer-object-title{background:#e7f0e4;border-bottom:1px solid #ceddca;padding:17px 21px;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.syncer-object-title .mini-label{margin:0}.syncer-object-title strong{font:600 17px "SFMono-Regular",Consolas,monospace}.syncer-members{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:20px}.syncer-members>div{border:1px solid var(--line);border-radius:10px;padding:15px;background:#f7f9f3;min-width:0}.syncer-members code{font-size:12px;color:var(--green);overflow-wrap:anywhere}.syncer-members span{display:block;color:var(--muted);font-size:12px;margin-top:7px}.syncer-methods{display:flex;gap:11px 22px;flex-wrap:wrap;border-top:1px dashed var(--line);padding:14px 20px;font-size:12px;color:var(--muted)}.syncer-methods code{color:var(--green);font-size:11px}.syncer-support{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:13px}.syncer-support>span{padding:12px 15px;border:1px solid var(--line);border-radius:10px;background:#eef2e9;font-size:12px;color:var(--muted)}.syncer-support strong{display:block;font:600 12px "SFMono-Regular",Consolas,monospace;color:var(--green);margin-bottom:5px}
+@media(max-width:760px){.syncer-members,.syncer-support{grid-template-columns:1fr}.syncer-members{padding:16px;gap:10px}.syncer-object-title{padding:15px 17px}.syncer-object-title strong{font-size:15px}.syncer-methods{padding:13px 16px}}
+@media print{.syncer-object-title{background:#eff4ec}.syncer-members,.syncer-support{grid-template-columns:1fr 1fr}.syncer-diagram{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="progress-track" aria-hidden="true"><span id="reading-progress"></span></div>
+<div class="layout">
+  <aside class="sidebar" aria-label="文档导航">
+    <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"><svg width="23" height="23" viewBox="0 0 24 24" fill="none"><path d="M6 5v12M6 9h10M6 16h10" stroke="currentColor" stroke-width="1.5"/><rect x="3.5" y="2.5" width="5" height="5" rx="1.4" fill="currentColor"/><rect x="14" y="6.5" width="5" height="5" rx="1.4" fill="currentColor"/><rect x="14" y="13.5" width="5" height="5" rx="1.4" fill="currentColor"/></svg></span>treeSync<span style="font-weight:400;color:#7b8b7d;font-size:12px">/ notes</span></a>
+    <p class="sidebar-label">目录树同步 · 实现文档</p>
+    <nav>
+      <a href="#rules" class="active"><span>01</span>节点如何匹配</a>
+      <a href="#examples"><span>02</span>三种变化，看图理解</a>
+      <a href="#architecture"><span>03</span>同步管理者与职责</a>
+      <a href="#implementation"><span>04</span>完整参考代码</a>
+      <a href="#transaction"><span>05</span>事务的执行顺序</a>
+      <a href="#integration"><span>06</span>Book 入口与规则边界</a>
+    </nav>
+    <div class="sidebar-foot">可离线打开的单文件文档<br>代码块支持复制 · 支持浏览器打印<br><code>biz/catalogue_syncer.go → Sync()</code></div>
+  </aside>
+  <main class="main" id="top">
+    <div class="brand mobile-brand"><span class="brand-mark" aria-hidden="true">↳</span>treeSync / notes</div>
+    <header class="hero">
+      <div class="eyebrow">Implementation guide / Go + GORM</div>
+      <h1>两棵目录树，<br>如何完成增量同步</h1>
+      <p class="hero-description">由 <code>CatalogueSyncer</code> 持有原树和新树，按父节点与名称匹配、保留既有 ID，并协调 model 层在同一个事务中同步目录与文章。</p>
+      <div class="hero-meta"><span class="pill">CatalogueSyncer</span><span class="pill">递归比较</span><span class="pill">ID 复用</span><span class="pill">逐条写入 · 单一事务</span><span class="pill">离线阅读</span></div>
+      <button type="button" class="print-button" id="print-document">打印 / 另存为 PDF ↗</button>
+    </header>
+
+    <section id="rules" aria-labelledby="rules-title">
+      <div class="section-top"><span class="section-index">01</span><h2 id="rules-title">先明确“同一个节点”</h2></div>
+      <p class="section-intro">原树 <code>originTree</code> 来自数据库；新树 <code>currentTree</code> 来自文件扫描，新树中的 ID 已经重新生成。比较时，先确认父节点匹配，再在这个父节点下按名称查找子节点。</p>
+      <div class="formula">父节点已匹配 ＋ Name 相同 ＝ 同一个目录节点</div>
+      <div class="table-scroll"><table><thead><tr><th scope="col">原树 originTree</th><th scope="col">新树 currentTree</th><th scope="col">操作</th></tr></thead><tbody>
+        <tr><td>存在</td><td>不存在</td><td><span class="status delete">删除</span> 删除该节点、全部后代，以及它们关联的文章。</td></tr>
+        <tr><td>不存在</td><td>存在</td><td><span class="status add">新增</span> 收集整棵新增子树，保留新生成的 ID。</td></tr>
+        <tr><td>存在</td><td>存在</td><td><span class="status keep">复用</span> 将旧目录 ID 赋给新节点，再继续比较子节点。</td></tr>
+      </tbody></table></div>
+      <div class="rule-grid"><div class="card"><h3>目录和文章分别保留身份</h3><p>同一目录节点继续使用旧 <code>Catalogue.ID</code>。两边均有文章时，新树的 <code>Article.ID</code> 也要复用旧值，避免未变化的文章被判成“先删再增”。</p></div><div class="card"><h3>移动或重命名属于增删</h3><p>同名节点换了父目录，或同一父目录下改了名称，都不满足匹配条件。按当前规则，删除旧位置的子树，再新增新位置的子树。</p></div></div>
+      <div class="callout"><p><strong>父节点身份按树上的匹配关系确定。</strong> 两棵树的初始 ID 不同，不能先用原始的父 ID 判断它们是否相同。递归进入一对已匹配的父节点后，才通过各自的 <code>index[Name]</code> 比较子节点。</p></div>
+    </section>
+
+    <section id="examples" aria-labelledby="examples-title">
+      <div class="section-top"><span class="section-index">02</span><h2 id="examples-title">三种变化，看图理解</h2></div>
+      <p class="section-intro">图中使用简短数字演示 ID。切换“对齐前 / 对齐后”，可以观察新生成的 ID 如何被原树中的 ID 替换。下方清单始终展示完成比较后的最终结果。</p>
+      <noscript><p>JavaScript 未启用。下方保留了“新增与删除”的静态示例；所有参考代码仍可直接阅读和手动复制。</p></noscript>
+      <div class="scenario-panel">
+        <div class="scenario-toolbar"><div class="scenario-tabs" role="tablist" aria-label="选择树变化示例"><button type="button" role="tab" aria-selected="true" aria-controls="scenario-content" data-scenario="0">新增与删除</button><button type="button" role="tab" aria-selected="false" aria-controls="scenario-content" data-scenario="1">同名文件移动</button><button type="button" role="tab" aria-selected="false" aria-controls="scenario-content" data-scenario="2">删除整棵子树</button></div><div class="alignment-switch" role="group" aria-label="选择 ID 对齐状态"><button type="button" aria-pressed="false" data-aligned="false">对齐前</button><button type="button" aria-pressed="true" data-aligned="true">对齐后</button></div></div>
+        <div id="scenario-content" role="tabpanel" aria-label="树变化示例">
+          <p class="scenario-description" id="scenario-description">“第1章”仍是同一父节点。保留“查询缓存”，删除“旧内容”，新增“新内容”。匹配节点使用原 ID；新增节点继续使用新生成的 ID。</p>
+          <div class="tree-pair"><div class="tree-pane"><div class="tree-pane-heading">originTree <small>数据库中的原树</small></div><div id="origin-tree"><ul class="tree-root"><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▱</span><span class="node-body"><span class="node-name">书籍根节点</span><span class="node-meta">目录 #100 </span></span><span class="node-badge">复用</span></div><ul><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▱</span><span class="node-body"><span class="node-name">第1章</span><span class="node-meta">目录 #110 </span></span><span class="node-badge">复用</span></div><ul><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▤</span><span class="node-body"><span class="node-name">1. 查询缓存.md</span><span class="node-meta">目录 #111 <span class="article-id">文章 #211</span></span></span><span class="node-badge">复用</span></div></li><li><div class="tree-node state-delete"><span class="node-symbol" aria-hidden="true">▤</span><span class="node-body"><span class="node-name">2. 旧内容.md</span><span class="node-meta">目录 #112 <span class="article-id">文章 #212</span></span></span><span class="node-badge">删除</span></div></li></ul></li><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▱</span><span class="node-body"><span class="node-name">第2章</span><span class="node-meta">目录 #120 </span></span><span class="node-badge">复用</span></div><ul><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▤</span><span class="node-body"><span class="node-name">1. 锁.md</span><span class="node-meta">目录 #121 <span class="article-id">文章 #221</span></span></span><span class="node-badge">复用</span></div></li></ul></li></ul></li></ul></div></div><div class="tree-pane"><div class="tree-pane-heading">currentTree <small id="alignment-label">ID 对齐后</small></div><div id="current-tree"><ul class="tree-root"><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▱</span><span class="node-body"><span class="node-name">书籍根节点</span><span class="node-meta">目录 #100 </span></span><span class="node-badge">复用</span></div><ul><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▱</span><span class="node-body"><span class="node-name">第1章</span><span class="node-meta">目录 #110 </span></span><span class="node-badge">复用</span></div><ul><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▤</span><span class="node-body"><span class="node-name">1. 查询缓存.md</span><span class="node-meta">目录 #111 <span class="article-id">文章 #211</span></span></span><span class="node-badge">复用</span></div></li><li><div class="tree-node state-add"><span class="node-symbol" aria-hidden="true">▤</span><span class="node-body"><span class="node-name">3. 新内容.md</span><span class="node-meta">目录 #913 <span class="article-id">文章 #993</span></span></span><span class="node-badge">新增</span></div></li></ul></li><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▱</span><span class="node-body"><span class="node-name">第2章</span><span class="node-meta">目录 #120 </span></span><span class="node-badge">复用</span></div><ul><li><div class="tree-node state-keep"><span class="node-symbol" aria-hidden="true">▤</span><span class="node-body"><span class="node-name">1. 锁.md</span><span class="node-meta">目录 #121 <span class="article-id">文章 #221</span></span></span><span class="node-badge">复用</span></div></li></ul></li></ul></li></ul></div></div></div>
+          <div class="legend"><span>复用身份</span><span class="legend-add">新增节点</span><span class="legend-delete">删除节点</span></div>
+          <div class="plan-preview"><div class="plan-title">最终变更清单 · ID 对齐完成后</div><div class="plan-grid" id="plan-grid"><div class="plan-item"><span class="plan-key">AddCatalogues</span><span class="plan-value">[{&quot;ID&quot;:913,&quot;ParentID&quot;:110}]</span></div><div class="plan-item"><span class="plan-key">AddArticles</span><span class="plan-value">[{&quot;ID&quot;:993,&quot;CatalogueID&quot;:913}]</span></div><div class="plan-item"><span class="plan-key">DeleteCatalogueIDs</span><span class="plan-value">[112]</span></div><div class="plan-item"><span class="plan-key">DeleteArticleIDs</span><span class="plan-value">[212]</span></div></div><p class="plan-note" id="plan-note">新增目录 913 的 ParentID 是已复用的 110，而不是新树刚生成的 910。</p><div class="report-preview" id="report-preview"><span>新增目录 <b>1</b></span><span>删除目录 <b>1</b></span><span>新增文章 <b>1</b></span><span>删除文章 <b>1</b></span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" aria-labelledby="architecture-title">
+      <div class="section-top"><span class="section-index">03</span><h2 id="architecture-title">CatalogueSyncer 管理一次同步任务</h2></div>
+      <p class="section-intro"><code>Catalogue</code> 表示节点；<code>CatalogueSyncer</code> 持有原树和新树，负责比较及协调持久化；<code>model</code> 根据清单执行数据库事务。每次同步创建一个独立的同步任务对象。</p>
+      <div class="syncer-diagram" role="img" aria-label="CatalogueSyncer 持有 originTree 和 currentTree 两个成员。Compare 生成变更清单，Sync 调用 model 执行事务；Catalogue 提供节点和子树操作，Book 在同步成功后采用新树。">
+        <div class="syncer-object"><div class="syncer-object-title"><span class="mini-label">BIZ / 一次同步任务</span><strong>CatalogueSyncer</strong></div><div class="syncer-members"><div><code>originTree *Catalogue</code><span>数据库中的原树 · 首次同步可为 nil</span></div><div><code>currentTree *Catalogue</code><span>扫描得到的新树 · 在这里复用原 ID</span></div></div><div class="syncer-methods"><span><code>Compare()</code> 生成变更</span><span><code>compareNodes()</code> 递归匹配</span><span><code>Sync()</code> 协调落盘与报告</span></div></div>
+        <div class="syncer-support"><span><strong>Catalogue</strong> 提供节点、索引、构树、扁平化、打印</span><span><strong>model</strong> 提供 ORM 与事务执行</span></div>
+      </div>
+      <div class="table-scroll"><table><thead><tr><th scope="col">对象 / 方法</th><th scope="col">职责</th></tr></thead><tbody><tr><td><code>Catalogue</code></td><td>保存单个节点的数据，维护 <code>Children</code>、<code>index</code>，提供构树和子树遍历操作。</td></tr><tr><td><code>CatalogueSyncer.Compare()</code></td><td>校验输入、对齐新树中的 ID，产出四组增删数据；原树保持不动。</td></tr><tr><td><code>CatalogueSyncer.Sync()</code></td><td>调用比较方法，再调用 model 层保存；事务成功后生成变更报告。</td></tr><tr><td><code>model.ApplyCatalogueChanges()</code></td><td>管理 <code>Begin()</code>、逐条执行 SQL、<code>Commit()</code> 和 <code>Rollback()</code>。</td></tr></tbody></table></div>
+      <div class="flow-diagram" role="img" aria-label="业务入口构建两棵树，CatalogueSyncer.Compare 对齐 ID 并生成清单，Sync 调用 model 事务执行，成功后 Book 使用新树并返回报告。"><div class="flow-step"><small>INPUT / 01</small><strong>业务入口准备两棵树</strong><p>从 ORM 恢复原树，从文件扫描构建新树。</p></div><div class="flow-step"><small>SYNCER / 02</small><strong>Compare() 生成清单</strong><p>compareNodes() 按父节点和名称匹配，复用 ID。</p></div><div class="flow-step"><small>MODEL / 03</small><strong>Sync() 调用事务执行</strong><p>model 在同一个 tx 中逐条执行增删。</p></div><div class="flow-step"><small>BOOK / 04</small><strong>成功后使用新树</strong><p>Sync() 返回报告，Book.Catalogue 指向新树。</p></div></div>
+      <div class="split-explanation"><div class="card"><div class="mini-label">四组数据</div><p><code>AddCatalogues</code>、<code>AddArticles</code> 保存待插入的 ORM；<code>DeleteCatalogueIDs</code>、<code>DeleteArticleIDs</code> 保存旧记录的主键。</p></div><div class="card"><div class="mini-label">节点缺失，通过参数表达</div><p>递归始终调用同一个 <code>s.compareNodes(origin, current, ...)</code>。同步对象 <code>s</code> 已存在；<code>origin</code> 或 <code>current</code> 可以为 <code>nil</code>，分别表示新增或删除。</p></div></div>
+      <details class="detail-box"><summary>这份实现的输入与生命周期约定</summary><ul><li>新树非空；原树在首次同步时可以为 <code>nil</code>，此时整棵新树都会进入新增清单。</li><li>原树存在时，两棵树属于同一本书，且内存对象彼此独立。</li><li>同一父节点下名称唯一，<code>index</code> 与 <code>Children</code> 保持一致；原树已经预加载 <code>Article</code>。</li><li><code>flattenInto()</code> 按先序遍历输出目录；新节点和新文章的雪花 ID 唯一。</li><li>一个同步对象对应一次任务。下次同步重新读取原树并创建新对象，避免重复应用同一份增删结果。</li></ul></details>
+    </section>
+
+    <section id="implementation" aria-labelledby="implementation-title">
+      <div class="section-top"><span class="section-index">04</span><h2 id="implementation-title">完整参考代码</h2></div>
+      <p class="section-intro">业务节点继续使用现有的 <code>Catalogue</code> 和 <code>Article</code>。在 <code>biz/catalogue_syncer.go</code> 中新增同步对象，依赖 <code>errors</code>、<code>fmt</code>、<code>treeSync/model</code> 和 <code>treeSync/reporter</code>。以下代码供接入时参考。</p>
+      <div class="code-section"><h3>A. model：定义变更清单</h3><p>清单是业务比较与持久化执行之间的数据契约。目录删除顺序由比较过程确定，事务中按顺序执行。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>model / CatalogueChanges</span><div class="code-actions"><span class="line-count">6 行 · Go</span><button type="button" class="copy-button" data-copy="code-changes">复制代码</button></div></div><pre tabindex="0" aria-label="model / CatalogueChanges"><code id="code-changes"><span class="code-line" data-line="1"><span class="tok-keyword">type</span> CatalogueChanges <span class="tok-keyword">struct</span> {</span>
+<span class="code-line" data-line="2">	AddCatalogues      []*Catalogue</span>
+<span class="code-line" data-line="3">	AddArticles        []*Article</span>
+<span class="code-line" data-line="4">	DeleteCatalogueIDs []<span class="tok-keyword">int64</span> <span class="tok-comment">// 子节点在前，父节点在后</span></span>
+<span class="code-line" data-line="5">	DeleteArticleIDs   []<span class="tok-keyword">int64</span></span>
+<span class="code-line" data-line="6">}</span></code></pre></div></div>
+      <div class="code-section"><h3>B. biz：定义 CatalogueSyncer</h3><p>对象只持有原树和新树两个成员。构造函数记录这两棵树；输入校验由 <code>Compare()</code> 完成。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / CatalogueSyncer 与构造函数</span><div class="code-actions"><span class="line-count">15 行 · Go</span><button type="button" class="copy-button" data-copy="code-syncer">复制代码</button></div></div><pre tabindex="0" aria-label="biz / CatalogueSyncer 与构造函数"><code id="code-syncer"><span class="code-line" data-line="1"><span class="tok-comment">// CatalogueSyncer 表示一次目录树同步任务。</span></span>
+<span class="code-line" data-line="2"><span class="tok-keyword">type</span> CatalogueSyncer <span class="tok-keyword">struct</span> {</span>
+<span class="code-line" data-line="3">	originTree  *Catalogue</span>
+<span class="code-line" data-line="4">	currentTree *Catalogue</span>
+<span class="code-line" data-line="5">}</span>
+<span class="code-line" data-line="6"></span>
+<span class="code-line" data-line="7"><span class="tok-keyword">func</span> NewCatalogueSyncer(</span>
+<span class="code-line" data-line="8">	originTree *Catalogue,</span>
+<span class="code-line" data-line="9">	currentTree *Catalogue,</span>
+<span class="code-line" data-line="10">) *CatalogueSyncer {</span>
+<span class="code-line" data-line="11">	<span class="tok-keyword">return</span> &amp;CatalogueSyncer{</span>
+<span class="code-line" data-line="12">		originTree:  originTree,</span>
+<span class="code-line" data-line="13">		currentTree: currentTree,</span>
+<span class="code-line" data-line="14">	}</span>
+<span class="code-line" data-line="15">}</span></code></pre></div></div>
+      <div class="code-section"><h3>C. Compare()：对齐 ID，生成变更</h3><p>这个方法处理内存数据：调整新树中的匹配 ID，并产出变更清单。数据库读写由业务入口和 model 层负责。原树为 <code>nil</code> 时，可直接生成首次同步的新增清单。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / (*CatalogueSyncer).Compare()</span><div class="code-actions"><span class="line-count">16 行 · Go</span><button type="button" class="copy-button" data-copy="code-compare">复制代码</button></div></div><pre tabindex="0" aria-label="biz / (*CatalogueSyncer).Compare()"><code id="code-compare"><span class="code-line" data-line="1"><span class="tok-comment">// Compare 对齐新树中的 ID，并生成增删清单；原树保持不动。</span></span>
+<span class="code-line" data-line="2"><span class="tok-keyword">func</span> (s *CatalogueSyncer) Compare() (*model.CatalogueChanges, <span class="tok-keyword">error</span>) {</span>
+<span class="code-line" data-line="3">	<span class="tok-keyword">if</span> s == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="4">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, errors.New(<span class="tok-string">&quot;同步任务不能为空&quot;</span>)</span>
+<span class="code-line" data-line="5">	}</span>
+<span class="code-line" data-line="6">	<span class="tok-keyword">if</span> s.currentTree == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="7">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, errors.New(<span class="tok-string">&quot;新树不能为空&quot;</span>)</span>
+<span class="code-line" data-line="8">	}</span>
+<span class="code-line" data-line="9">	<span class="tok-keyword">if</span> s.originTree != <span class="tok-keyword">nil</span> &amp;&amp; s.originTree.BookID != s.currentTree.BookID {</span>
+<span class="code-line" data-line="10">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, errors.New(<span class="tok-string">&quot;两棵目录树不属于同一本书&quot;</span>)</span>
+<span class="code-line" data-line="11">	}</span>
+<span class="code-line" data-line="12"></span>
+<span class="code-line" data-line="13">	changes := &amp;model.CatalogueChanges{}</span>
+<span class="code-line" data-line="14">	s.compareNodes(s.originTree, s.currentTree, <span class="tok-number">0</span>, changes)</span>
+<span class="code-line" data-line="15">	<span class="tok-keyword">return</span> changes, <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="16">}</span></code></pre></div></div>
+      <div class="code-section"><h3>D. compareNodes()：同步对象的递归辅助方法</h3><p>接收者 <code>s</code> 表示整个同步任务。<code>origin</code> 和 <code>current</code> 是两侧待比较的节点，递归时显式传入，缺失的一侧使用 <code>nil</code>。文章比较使用三个互斥的平级 <code>if</code>：两边都有时复用 ID，仅原树有时删除，仅新树有时新增。两边都没有文章时，三个条件均不成立。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / (*CatalogueSyncer).compareNodes()</span><div class="code-actions"><span class="line-count">82 行 · Go</span><button type="button" class="copy-button" data-copy="code-nodes">复制代码</button></div></div><pre tabindex="0" aria-label="biz / (*CatalogueSyncer).compareNodes()"><code id="code-nodes"><span class="code-line" data-line="1"><span class="tok-comment">// compareNodes 比较一对节点；origin 和 current 可以为 nil。</span></span>
+<span class="code-line" data-line="2"><span class="tok-keyword">func</span> (s *CatalogueSyncer) compareNodes(</span>
+<span class="code-line" data-line="3">	origin *Catalogue,</span>
+<span class="code-line" data-line="4">	current *Catalogue,</span>
+<span class="code-line" data-line="5">	parentID <span class="tok-keyword">int64</span>,</span>
+<span class="code-line" data-line="6">	changes *model.CatalogueChanges,</span>
+<span class="code-line" data-line="7">) {</span>
+<span class="code-line" data-line="8">	<span class="tok-comment">// 原树不存在：新增当前节点及其全部后代。</span></span>
+<span class="code-line" data-line="9">	<span class="tok-keyword">if</span> origin == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="10">		<span class="tok-keyword">if</span> current != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="11">			current.flattenInto(</span>
+<span class="code-line" data-line="12">				parentID,</span>
+<span class="code-line" data-line="13">				&amp;changes.AddCatalogues,</span>
+<span class="code-line" data-line="14">				&amp;changes.AddArticles,</span>
+<span class="code-line" data-line="15">			)</span>
+<span class="code-line" data-line="16">		}</span>
+<span class="code-line" data-line="17">		<span class="tok-keyword">return</span></span>
+<span class="code-line" data-line="18">	}</span>
+<span class="code-line" data-line="19"></span>
+<span class="code-line" data-line="20">	<span class="tok-comment">// 新树不存在：删除原节点及其全部后代和文章。</span></span>
+<span class="code-line" data-line="21">	<span class="tok-keyword">if</span> current == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="22">		catalogues, articles := origin.flatten()</span>
+<span class="code-line" data-line="23"></span>
+<span class="code-line" data-line="24">		<span class="tok-keyword">for</span> _, article := <span class="tok-keyword">range</span> articles {</span>
+<span class="code-line" data-line="25">			changes.DeleteArticleIDs = append(</span>
+<span class="code-line" data-line="26">				changes.DeleteArticleIDs, article.ID,</span>
+<span class="code-line" data-line="27">			)</span>
+<span class="code-line" data-line="28">		}</span>
+<span class="code-line" data-line="29"></span>
+<span class="code-line" data-line="30">		<span class="tok-comment">// flatten() 是父节点在前，反向遍历得到子节点在前。</span></span>
+<span class="code-line" data-line="31">		<span class="tok-keyword">for</span> i := len(catalogues) - <span class="tok-number">1</span>; i &gt;= <span class="tok-number">0</span>; i-- {</span>
+<span class="code-line" data-line="32">			changes.DeleteCatalogueIDs = append(</span>
+<span class="code-line" data-line="33">				changes.DeleteCatalogueIDs, catalogues[i].ID,</span>
+<span class="code-line" data-line="34">			)</span>
+<span class="code-line" data-line="35">		}</span>
+<span class="code-line" data-line="36">		<span class="tok-keyword">return</span></span>
+<span class="code-line" data-line="37">	}</span>
+<span class="code-line" data-line="38"></span>
+<span class="code-line" data-line="39">	<span class="tok-comment">// 根节点的父节点均视为空，因此根节点也按名称匹配。</span></span>
+<span class="code-line" data-line="40">	<span class="tok-keyword">if</span> origin.Name != current.Name {</span>
+<span class="code-line" data-line="41">		s.compareNodes(origin, <span class="tok-keyword">nil</span>, parentID, changes)</span>
+<span class="code-line" data-line="42">		s.compareNodes(<span class="tok-keyword">nil</span>, current, parentID, changes)</span>
+<span class="code-line" data-line="43">		<span class="tok-keyword">return</span></span>
+<span class="code-line" data-line="44">	}</span>
+<span class="code-line" data-line="45"></span>
+<span class="code-line" data-line="46">	<span class="tok-comment">// 同一节点：只在新树上复用原有目录 ID。</span></span>
+<span class="code-line" data-line="47">	current.ID = origin.ID</span>
+<span class="code-line" data-line="48"></span>
+<span class="code-line" data-line="49">	<span class="tok-comment">// 两边都有文章：复用原文章 ID。</span></span>
+<span class="code-line" data-line="50">	<span class="tok-keyword">if</span> origin.Article != <span class="tok-keyword">nil</span> &amp;&amp; current.Article != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="51">		current.Article.ID = origin.Article.ID</span>
+<span class="code-line" data-line="52">	}</span>
+<span class="code-line" data-line="53"></span>
+<span class="code-line" data-line="54">	<span class="tok-comment">// 只有原树有文章：删除。</span></span>
+<span class="code-line" data-line="55">	<span class="tok-keyword">if</span> origin.Article != <span class="tok-keyword">nil</span> &amp;&amp; current.Article == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="56">		changes.DeleteArticleIDs = append(</span>
+<span class="code-line" data-line="57">			changes.DeleteArticleIDs, origin.Article.ID,</span>
+<span class="code-line" data-line="58">		)</span>
+<span class="code-line" data-line="59">	}</span>
+<span class="code-line" data-line="60"></span>
+<span class="code-line" data-line="61">	<span class="tok-comment">// 只有新树有文章：新增。</span></span>
+<span class="code-line" data-line="62">	<span class="tok-keyword">if</span> origin.Article == <span class="tok-keyword">nil</span> &amp;&amp; current.Article != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="63">		changes.AddArticles = append(changes.AddArticles, &amp;model.Article{</span>
+<span class="code-line" data-line="64">			ID:          current.Article.ID,</span>
+<span class="code-line" data-line="65">			CatalogueID: current.ID,</span>
+<span class="code-line" data-line="66">			Path:        current.Article.Path,</span>
+<span class="code-line" data-line="67">		})</span>
+<span class="code-line" data-line="68">	}</span>
+<span class="code-line" data-line="69"></span>
+<span class="code-line" data-line="70">	<span class="tok-comment">// 处理原有子节点：匹配或删除。</span></span>
+<span class="code-line" data-line="71">	<span class="tok-keyword">for</span> _, originChild := <span class="tok-keyword">range</span> origin.Children {</span>
+<span class="code-line" data-line="72">		currentChild := current.index[originChild.Name]</span>
+<span class="code-line" data-line="73">		s.compareNodes(originChild, currentChild, current.ID, changes)</span>
+<span class="code-line" data-line="74">	}</span>
+<span class="code-line" data-line="75"></span>
+<span class="code-line" data-line="76">	<span class="tok-comment">// 处理新增子节点；已匹配的节点在上一循环中处理过。</span></span>
+<span class="code-line" data-line="77">	<span class="tok-keyword">for</span> _, currentChild := <span class="tok-keyword">range</span> current.Children {</span>
+<span class="code-line" data-line="78">		<span class="tok-keyword">if</span> _, exists := origin.index[currentChild.Name]; !exists {</span>
+<span class="code-line" data-line="79">			s.compareNodes(<span class="tok-keyword">nil</span>, currentChild, current.ID, changes)</span>
+<span class="code-line" data-line="80">		}</span>
+<span class="code-line" data-line="81">	}</span>
+<span class="code-line" data-line="82">}</span></code></pre></div></div>
+      <div class="callout"><p><strong>同步对象始终存在，缺失节点通过参数表示。</strong> 先处理 <code>origin == nil</code> 的新增分支，再处理 <code>current == nil</code> 的删除分支，之后才访问节点字段。两侧节点都为 <code>nil</code> 时直接返回。</p></div>
+      <div class="table-scroll"><table><thead><tr><th scope="col">递归调用</th><th scope="col">节点状态</th><th scope="col">处理方式</th></tr></thead><tbody><tr><td><code>s.compareNodes(nil, current, parentID, changes)</code></td><td>只有新节点</td><td>收集整棵新增子树。</td></tr><tr><td><code>s.compareNodes(origin, nil, parentID, changes)</code></td><td>只有旧节点</td><td>收集整棵旧子树及文章的删除 ID。</td></tr><tr><td><code>s.compareNodes(origin, current, parentID, changes)</code></td><td>两边都有节点</td><td>按名称匹配、复用 ID，再比较子节点。</td></tr></tbody></table></div>
+      <div class="callout"><p><strong>新增子树的父 ID 必须正确。</strong> 父节点匹配后，<code>current.ID</code> 已经被替换成旧 ID。递归时将它传给 <code>flattenInto()</code>，新子树才会连接到数据库中已有的父节点。</p></div>
+      <div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>新增子树 / parentID 的传递</span><div class="code-actions"><span class="line-count">5 行 · Go</span><button type="button" class="copy-button" data-copy="code-parent">复制代码</button></div></div><pre tabindex="0" aria-label="新增子树 / parentID 的传递"><code id="code-parent"><span class="code-line" data-line="1"><span class="tok-comment">// 正确：新增子树继承已匹配父节点的原有 ID。</span></span>
+<span class="code-line" data-line="2">current.flattenInto(parentID, &amp;changes.AddCatalogues, &amp;changes.AddArticles)</span>
+<span class="code-line" data-line="3"></span>
+<span class="code-line" data-line="4"><span class="tok-comment">// flatten() 从 ParentID = 0 开始，只适合整棵树。</span></span>
+<span class="code-line" data-line="5"><span class="tok-comment">// 对新增子树直接调用它，会丢失子树根节点的真实父 ID。</span></span></code></pre></div>
+      <div class="code-section"><h3>E. Sync()：协调事务保存并返回报告</h3><p><code>Sync()</code> 先调用 <code>Compare()</code>，再将清单交给 <code>model.ApplyCatalogueChanges()</code>。只有事务提交成功，才返回成功报告。同步对象保留原树快照；由调用方在成功后使用新树。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / (*CatalogueSyncer).Sync()</span><div class="code-actions"><span class="line-count">23 行 · Go</span><button type="button" class="copy-button" data-copy="code-sync">复制代码</button></div></div><pre tabindex="0" aria-label="biz / (*CatalogueSyncer).Sync()"><code id="code-sync"><span class="code-line" data-line="1"><span class="tok-comment">// Sync 完成一次比较与落盘，成功后返回变更报告。</span></span>
+<span class="code-line" data-line="2"><span class="tok-keyword">func</span> (s *CatalogueSyncer) Sync() (*reporter.Report, <span class="tok-keyword">error</span>) {</span>
+<span class="code-line" data-line="3">	changes, err := s.Compare()</span>
+<span class="code-line" data-line="4">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="5">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, err</span>
+<span class="code-line" data-line="6">	}</span>
+<span class="code-line" data-line="7"></span>
+<span class="code-line" data-line="8">	<span class="tok-keyword">if</span> err := model.ApplyCatalogueChanges(changes); err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="9">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, fmt.Errorf(<span class="tok-string">&quot;同步目录树失败: %w&quot;</span>, err)</span>
+<span class="code-line" data-line="10">	}</span>
+<span class="code-line" data-line="11"></span>
+<span class="code-line" data-line="12">	<span class="tok-comment">// 到这里事务已提交。两棵树继续保存在任务对象中，供调用方使用。</span></span>
+<span class="code-line" data-line="13">	<span class="tok-keyword">return</span> &amp;reporter.Report{</span>
+<span class="code-line" data-line="14">		CatalogueReport: &amp;reporter.CatalogueReport{</span>
+<span class="code-line" data-line="15">			AddItemQuantity:    len(changes.AddCatalogues),</span>
+<span class="code-line" data-line="16">			DeleteItemQuantity: len(changes.DeleteCatalogueIDs),</span>
+<span class="code-line" data-line="17">		},</span>
+<span class="code-line" data-line="18">		ArticleReport: &amp;reporter.ArticleReport{</span>
+<span class="code-line" data-line="19">			AddItemQuantity:    len(changes.AddArticles),</span>
+<span class="code-line" data-line="20">			DeleteItemQuantity: len(changes.DeleteArticleIDs),</span>
+<span class="code-line" data-line="21">		},</span>
+<span class="code-line" data-line="22">	}, <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="23">}</span></code></pre></div></div>
+      <div class="code-section"><h3>F. model：在同一个事务中逐条执行</h3><p>放在 <code>model</code> 包中，依赖 <code>fmt</code> 和 <code>treeSync/db</code>。事务执行细节集中在这里，按删除文章、删除目录、新增目录、新增文章的顺序执行。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>model / ApplyCatalogueChanges()</span><div class="code-actions"><span class="line-count">46 行 · Go</span><button type="button" class="copy-button" data-copy="code-apply">复制代码</button></div></div><pre tabindex="0" aria-label="model / ApplyCatalogueChanges()"><code id="code-apply"><span class="code-line" data-line="1"><span class="tok-keyword">func</span> ApplyCatalogueChanges(changes *CatalogueChanges) <span class="tok-keyword">error</span> {</span>
+<span class="code-line" data-line="2">	tx := db.DB.Begin()</span>
+<span class="code-line" data-line="3">	<span class="tok-keyword">if</span> tx.Error != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="4">		<span class="tok-keyword">return</span> fmt.Errorf(<span class="tok-string">&quot;开启事务失败: %w&quot;</span>, tx.Error)</span>
+<span class="code-line" data-line="5">	}</span>
+<span class="code-line" data-line="6"></span>
+<span class="code-line" data-line="7">	committed := <span class="tok-keyword">false</span></span>
+<span class="code-line" data-line="8">	<span class="tok-keyword">defer</span> <span class="tok-keyword">func</span>() {</span>
+<span class="code-line" data-line="9">		<span class="tok-keyword">if</span> !committed {</span>
+<span class="code-line" data-line="10">			_ = tx.Rollback().Error</span>
+<span class="code-line" data-line="11">		}</span>
+<span class="code-line" data-line="12">	}()</span>
+<span class="code-line" data-line="13"></span>
+<span class="code-line" data-line="14">	<span class="tok-comment">// 先删除文章，再删除目录。</span></span>
+<span class="code-line" data-line="15">	<span class="tok-keyword">for</span> _, id := <span class="tok-keyword">range</span> changes.DeleteArticleIDs {</span>
+<span class="code-line" data-line="16">		<span class="tok-keyword">if</span> err := tx.Delete(&amp;Article{}, id).Error; err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="17">			<span class="tok-keyword">return</span> fmt.Errorf(<span class="tok-string">&quot;删除文章 %d 失败: %w&quot;</span>, id, err)</span>
+<span class="code-line" data-line="18">		}</span>
+<span class="code-line" data-line="19">	}</span>
+<span class="code-line" data-line="20"></span>
+<span class="code-line" data-line="21">	<span class="tok-keyword">for</span> _, id := <span class="tok-keyword">range</span> changes.DeleteCatalogueIDs {</span>
+<span class="code-line" data-line="22">		<span class="tok-keyword">if</span> err := tx.Delete(&amp;Catalogue{}, id).Error; err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="23">			<span class="tok-keyword">return</span> fmt.Errorf(<span class="tok-string">&quot;删除目录 %d 失败: %w&quot;</span>, id, err)</span>
+<span class="code-line" data-line="24">		}</span>
+<span class="code-line" data-line="25">	}</span>
+<span class="code-line" data-line="26"></span>
+<span class="code-line" data-line="27">	<span class="tok-comment">// 新增目录按父节点在前的顺序写入。</span></span>
+<span class="code-line" data-line="28">	<span class="tok-keyword">for</span> _, catalogue := <span class="tok-keyword">range</span> changes.AddCatalogues {</span>
+<span class="code-line" data-line="29">		<span class="tok-keyword">if</span> err := tx.Omit(<span class="tok-string">&quot;Article&quot;</span>).Create(catalogue).Error; err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="30">			<span class="tok-keyword">return</span> fmt.Errorf(<span class="tok-string">&quot;新增目录 %d 失败: %w&quot;</span>, catalogue.ID, err)</span>
+<span class="code-line" data-line="31">		}</span>
+<span class="code-line" data-line="32">	}</span>
+<span class="code-line" data-line="33"></span>
+<span class="code-line" data-line="34">	<span class="tok-keyword">for</span> _, article := <span class="tok-keyword">range</span> changes.AddArticles {</span>
+<span class="code-line" data-line="35">		<span class="tok-keyword">if</span> err := tx.Create(article).Error; err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="36">			<span class="tok-keyword">return</span> fmt.Errorf(<span class="tok-string">&quot;新增文章 %d 失败: %w&quot;</span>, article.ID, err)</span>
+<span class="code-line" data-line="37">		}</span>
+<span class="code-line" data-line="38">	}</span>
+<span class="code-line" data-line="39"></span>
+<span class="code-line" data-line="40">	<span class="tok-keyword">if</span> err := tx.Commit().Error; err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="41">		<span class="tok-keyword">return</span> fmt.Errorf(<span class="tok-string">&quot;提交事务失败: %w&quot;</span>, err)</span>
+<span class="code-line" data-line="42">	}</span>
+<span class="code-line" data-line="43"></span>
+<span class="code-line" data-line="44">	committed = <span class="tok-keyword">true</span></span>
+<span class="code-line" data-line="45">	<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="46">}</span></code></pre></div></div>
+      <details class="detail-box"><summary>为什么新增目录使用 Omit("Article")？</summary><p>目录 ORM 已经声明文章关联，GORM 默认可以自动保存非空关联。这里使用两组切片分别插入目录和文章，因此使用 <code>Omit("Article")</code>，让文章由后面的文章循环保存。</p></details>
+    </section>
+
+    <section id="transaction" aria-labelledby="transaction-title">
+      <div class="section-top"><span class="section-index">05</span><h2 id="transaction-title">事务的执行顺序</h2></div>
+      <p class="section-intro">删除与新增都要满足关联关系。整棵子树的删除列表来自先序列表的反向遍历；新增列表则继续使用先序顺序。</p>
+      <div class="transaction-box"><div class="tx-boundary"><span>tx := db.DB.Begin()</span><span>全部操作共用一个事务</span></div><ol class="tx-list"><li><strong>删除文章</strong><small>先处理 <code>DeleteArticleIDs</code>，解除文章对目录的引用。</small></li><li><strong>删除目录：子节点 → 父节点</strong><small>按 <code>DeleteCatalogueIDs</code> 的既定顺序，逐条执行删除。</small></li><li><strong>新增目录：父节点 → 子节点</strong><small>先序输出保证新增父目录先写入；已有父目录使用复用后的旧 ID。</small></li><li><strong>新增文章</strong><small>文章的 <code>CatalogueID</code> 指向已存在或刚插入的目录节点。</small></li></ol><div class="tx-commit"><span class="tx-success">Commit() → Sync() 返回报告 → Book 使用新树</span><span class="tx-fail">中途错误 / panic → defer 尝试 Rollback()</span></div></div>
+      <p>模型中的 <code>Catalogue</code> 和 <code>Article</code> 没有声明 <code>gorm.DeletedAt</code>，上面的 <code>Delete()</code> 是实际删除记录。报告数量按成功提交的变更清单长度统计。</p>
+    </section>
+
+    <section id="integration" aria-labelledby="integration-title">
+      <div class="section-top"><span class="section-index">06</span><h2 id="integration-title">从 Book 入口创建同步任务</h2></div>
+      <p class="section-intro">在 <code>Book.Build()</code> 已查询并填充书籍信息之后，调用下面的辅助方法。它准备两棵树，创建 <code>CatalogueSyncer</code> 并启动同步，事务成功后再令 <code>Book.Catalogue</code> 指向新树。</p>
+      <div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / (*Book).syncCatalogue()</span><div class="code-actions"><span class="line-count">31 行 · Go</span><button type="button" class="copy-button" data-copy="code-build">复制代码</button></div></div><pre tabindex="0" aria-label="biz / (*Book).syncCatalogue()"><code id="code-build"><span class="code-line" data-line="1"><span class="tok-comment">// syncCatalogue 放在 biz/book.go 中，由 Book.Build() 调用。</span></span>
+<span class="code-line" data-line="2"><span class="tok-keyword">func</span> (b *Book) syncCatalogue(rootPath <span class="tok-keyword">string</span>) (*reporter.Report, <span class="tok-keyword">error</span>) {</span>
+<span class="code-line" data-line="3">	orm := &amp;model.Catalogue{}</span>
+<span class="code-line" data-line="4">	rows, err := orm.FindByBookID(b.ID)</span>
+<span class="code-line" data-line="5">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="6">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, fmt.Errorf(<span class="tok-string">&quot;获取书籍目录失败: %w&quot;</span>, err)</span>
+<span class="code-line" data-line="7">	}</span>
+<span class="code-line" data-line="8"></span>
+<span class="code-line" data-line="9">	<span class="tok-keyword">var</span> originTree *Catalogue</span>
+<span class="code-line" data-line="10">	<span class="tok-keyword">if</span> len(rows) &gt; <span class="tok-number">0</span> {</span>
+<span class="code-line" data-line="11">		originTree = &amp;Catalogue{}</span>
+<span class="code-line" data-line="12">		<span class="tok-keyword">if</span> err := originTree.buildFromRows(rows); err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="13">			<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, fmt.Errorf(<span class="tok-string">&quot;恢复原树失败: %w&quot;</span>, err)</span>
+<span class="code-line" data-line="14">		}</span>
+<span class="code-line" data-line="15">	}</span>
+<span class="code-line" data-line="16"></span>
+<span class="code-line" data-line="17">	currentTree := &amp;Catalogue{}</span>
+<span class="code-line" data-line="18">	<span class="tok-keyword">if</span> err := currentTree.buildFromPath(b.ID, b.Title, rootPath); err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="19">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, fmt.Errorf(<span class="tok-string">&quot;构建新树失败: %w&quot;</span>, err)</span>
+<span class="code-line" data-line="20">	}</span>
+<span class="code-line" data-line="21"></span>
+<span class="code-line" data-line="22">	syncer := NewCatalogueSyncer(originTree, currentTree)</span>
+<span class="code-line" data-line="23">	report, err := syncer.Sync()</span>
+<span class="code-line" data-line="24">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="25">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, err</span>
+<span class="code-line" data-line="26">	}</span>
+<span class="code-line" data-line="27"></span>
+<span class="code-line" data-line="28">	<span class="tok-comment">// 只在事务成功提交后，让书籍采用新树。</span></span>
+<span class="code-line" data-line="29">	b.Catalogue = currentTree</span>
+<span class="code-line" data-line="30">	<span class="tok-keyword">return</span> report, <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="31">}</span></code></pre></div>
+      <p>把原来调用 <code>b.Catalogue.Build(...)</code> 的入口，调整为：</p>
+      <div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / Book.Build() 调用位置</span><div class="code-actions"><span class="line-count">3 行 · Go</span><button type="button" class="copy-button" data-copy="code-book-entry">复制代码</button></div></div><pre tabindex="0" aria-label="biz / Book.Build() 调用位置"><code id="code-book-entry"><span class="code-line" data-line="1"><span class="tok-comment">// Book.Build() 中：查询并填充书籍信息后，调用同步入口。</span></span>
+<span class="code-line" data-line="2">b.fillByORM(orm)</span>
+<span class="code-line" data-line="3"><span class="tok-keyword">return</span> b.syncCatalogue(path)</span></code></pre></div>
+      <div class="boundary-grid"><div class="card"><h3>首次同步也走同一个入口</h3><p>数据库中没有目录时，<code>originTree</code> 保持 <code>nil</code>。<code>Compare()</code> 会收集整棵新树，包括根节点和文章，随后由相同的事务函数保存。</p></div><div class="card"><h3>根节点同样按名称匹配</h3><p>代码把根节点的父节点视为空。根名称不同，会整树删除旧节点、整树新增新节点。若希望书名改变时保留根 ID，需要单独定义根节点按 <code>BookID</code> 匹配的规则。</p></div><div class="card"><h3>已有字段的更新是下一类操作</h3><p>当前范围是新增、删除和 ID 复用。同名同父节点的 <code>Type</code> 或文章 <code>Path</code> 改变时，需要在清单中增加字段更新项，并在同一事务中执行。</p></div><div class="card"><h3>原树快照与最终树各有用途</h3><p><code>Compare()</code> 只修改新树中的匹配 ID；原树保留旧身份和删除依据。<code>Sync()</code> 成功返回后，业务入口通过 <code>b.Catalogue = currentTree</code> 采用新树。</p></div><div class="card"><h3>目录与文章各自比较</h3><p>匹配目录下，两边都有文章就复用文章 ID；仅旧树有文章就删除；仅新树有文章就新增。文章的 <code>CatalogueID</code> 使用已对齐的目录 ID。</p></div><div class="card"><h3>每次任务创建一个同步对象</h3><p>一次成功同步后，下一次任务重新读取数据库并重新构建新树。同步对象持有的是本次任务的两份输入，避免重复调用 <code>Sync()</code> 应用相同增删。</p></div></div>
+      <div class="callout neutral"><p><strong>接入分工：</strong> 在 <code>biz/catalogue_syncer.go</code> 中新增 <code>CatalogueSyncer</code>、<code>Compare()</code>、<code>compareNodes()</code> 和 <code>Sync()</code>；<code>Catalogue</code> 保留构树、索引、扁平化和打印；model 层保存 ORM 与事务函数；<code>Book.Build()</code> 调用同步入口。</p></div>
+      <ul class="source-links" aria-label="延伸阅读"><li><a href="https://gorm.io/zh_CN/docs/delete.html#根据主键删除" target="_blank" rel="noopener noreferrer">GORM · 按主键删除 ↗</a></li><li><a href="https://gorm.io/zh_CN/docs/transactions.html#手动事务" target="_blank" rel="noopener noreferrer">GORM · 手动事务 ↗</a></li><li><a href="https://gorm.io/zh_CN/docs/associations.html#跳过自动创建、更新" target="_blank" rel="noopener noreferrer">GORM · 控制关联保存 ↗</a></li></ul>
+    </section>
+    <footer class="footer"><span>treeSync · 目录树增量同步实现说明</span><span><code>catalogue-tree-compare.html</code> · 2026-11-02</span></footer>
+  </main>
+</div>
+<div class="visually-hidden" role="status" aria-live="polite" id="copy-status"></div>
+<script type="application/json" id="scenario-data">[{"key":"basic","label":"新增与删除","description":"“第1章”仍是同一父节点。保留“查询缓存”，删除“旧内容”，新增“新内容”。匹配节点使用原 ID；新增节点继续使用新生成的 ID。","origin":{"name":"书籍根节点","id":100,"status":"keep","children":[{"name":"第1章","id":110,"status":"keep","children":[{"name":"1. 查询缓存.md","id":111,"status":"keep","children":[],"article":{"id":211}},{"name":"2. 旧内容.md","id":112,"status":"delete","children":[],"article":{"id":212}}]},{"name":"第2章","id":120,"status":"keep","children":[{"name":"1. 锁.md","id":121,"status":"keep","children":[],"article":{"id":221}}]}]},"current":{"name":"书籍根节点","id":900,"status":"keep","children":[{"name":"第1章","id":910,"status":"keep","children":[{"name":"1. 查询缓存.md","id":911,"status":"keep","children":[],"article":{"id":991,"aligned":211},"aligned":111},{"name":"3. 新内容.md","id":913,"status":"add","children":[],"article":{"id":993}}],"aligned":110},{"name":"第2章","id":920,"status":"keep","children":[{"name":"1. 锁.md","id":921,"status":"keep","children":[],"article":{"id":999,"aligned":221},"aligned":121}],"aligned":120}],"aligned":100},"plan":{"addCatalogues":[{"ID":913,"ParentID":110}],"addArticles":[{"ID":993,"CatalogueID":913}],"deleteCatalogueIDs":[112],"deleteArticleIDs":[212]},"note":"新增目录 913 的 ParentID 是已复用的 110，而不是新树刚生成的 910。"},{"key":"move","label":"同名文件移动","description":"“共享内容.md”从第1章移到第2章。名称虽然相同，但父节点不同，因此按删除旧节点、新增新节点处理。","origin":{"name":"书籍根节点","id":100,"status":"keep","children":[{"name":"第1章","id":110,"status":"keep","children":[{"name":"保留.md","id":114,"status":"keep","children":[],"article":{"id":214}},{"name":"共享内容.md","id":111,"status":"delete","children":[],"article":{"id":211}}]},{"name":"第2章","id":120,"status":"keep","children":[{"name":"简介.md","id":122,"status":"keep","children":[],"article":{"id":222}}]}]},"current":{"name":"书籍根节点","id":900,"status":"keep","children":[{"name":"第1章","id":910,"status":"keep","children":[{"name":"保留.md","id":914,"status":"keep","children":[],"article":{"id":994,"aligned":214},"aligned":114}],"aligned":110},{"name":"第2章","id":920,"status":"keep","children":[{"name":"简介.md","id":922,"status":"keep","children":[],"article":{"id":992,"aligned":222},"aligned":122},{"name":"共享内容.md","id":923,"status":"add","children":[],"article":{"id":995}}],"aligned":120}],"aligned":100},"plan":{"addCatalogues":[{"ID":923,"ParentID":120}],"addArticles":[{"ID":995,"CatalogueID":923}],"deleteCatalogueIDs":[111],"deleteArticleIDs":[211]},"note":"新位置使用目录 ID 923 和文章 ID 995，不复用旧位置的 111 和 211。"},{"key":"subtree","label":"删除整棵子树","description":"新树中整个“第1章”都已消失。比较在这一层收集整棵旧子树，覆盖全部后代目录和文章，无需再对这棵子树逐层匹配。","origin":{"name":"书籍根节点","id":100,"status":"keep","children":[{"name":"第1章","id":110,"status":"delete","children":[{"name":"解析与优化","id":111,"status":"delete","children":[{"name":"查询缓存.md","id":112,"status":"delete","children":[],"article":{"id":212}},{"name":"语法解析.md","id":113,"status":"delete","children":[],"article":{"id":213}}]}]},{"name":"第2章","id":120,"status":"keep","children":[{"name":"锁.md","id":121,"status":"keep","children":[],"article":{"id":221}}]}]},"current":{"name":"书籍根节点","id":900,"status":"keep","children":[{"name":"第2章","id":920,"status":"keep","children":[{"name":"锁.md","id":921,"status":"keep","children":[],"article":{"id":999,"aligned":221},"aligned":121}],"aligned":120}],"aligned":100},"plan":{"addCatalogues":[],"addArticles":[],"deleteCatalogueIDs":[113,112,111,110],"deleteArticleIDs":[212,213]},"note":"先删除文章 212、213，再依次删除目录 113、112、111、110，父目录最后删除。"}]</script>
+<script>
+(() => {
+  const scenarios = JSON.parse(document.getElementById('scenario-data').textContent);
+  let sceneIndex = 0;
+  let aligned = true;
+  const make = (tag, className, value) => {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (value !== undefined) element.textContent = value;
+    return element;
+  };
+  function drawTree(tree, side) {
+    const list = make('ul', 'tree-root');
+    function addNode(data) {
+      const item = make('li');
+      const row = make('div', 'tree-node state-' + data.status);
+      const symbol = make('span', 'node-symbol', data.article ? '▤' : '▱');
+      symbol.setAttribute('aria-hidden', 'true');
+      const body = make('span', 'node-body');
+      body.append(make('span', 'node-name', data.name));
+      const id = side === 'current' && aligned ? (data.aligned ?? data.id) : data.id;
+      const meta = make('span', 'node-meta', '目录 #' + id);
+      if (data.article) {
+        const articleID = side === 'current' && aligned ? (data.article.aligned ?? data.article.id) : data.article.id;
+        meta.append(make('span', 'article-id', '文章 #' + articleID));
+      }
+      body.append(meta);
+      row.append(symbol, body, make('span', 'node-badge', {keep:'复用',add:'新增',delete:'删除'}[data.status]));
+      item.append(row);
+      if (data.children.length) {
+        const children = make('ul');
+        data.children.forEach(child => children.append(addNode(child)));
+        item.append(children);
+      }
+      return item;
+    }
+    list.append(addNode(tree));
+    return list;
+  }
+  function render() {
+    const scene = scenarios[sceneIndex];
+    document.getElementById('origin-tree').replaceChildren(drawTree(scene.origin, 'origin'));
+    document.getElementById('current-tree').replaceChildren(drawTree(scene.current, 'current'));
+    document.getElementById('scenario-description').textContent = scene.description;
+    document.getElementById('alignment-label').textContent = aligned ? 'ID 对齐后' : '刚完成扫描';
+    document.getElementById('plan-note').textContent = scene.note;
+    const fields = [
+      ['addCatalogues', 'AddCatalogues'], ['addArticles', 'AddArticles'],
+      ['deleteCatalogueIDs', 'DeleteCatalogueIDs'], ['deleteArticleIDs', 'DeleteArticleIDs']
+    ];
+    const plan = document.getElementById('plan-grid');
+    plan.replaceChildren();
+    fields.forEach(([key, title]) => {
+      const card = make('div', 'plan-item');
+      card.append(make('span', 'plan-key', title), make('span', 'plan-value', JSON.stringify(scene.plan[key])));
+      plan.append(card);
+    });
+    const counts = document.getElementById('report-preview');
+    counts.replaceChildren();
+    [['新增目录',scene.plan.addCatalogues.length],['删除目录',scene.plan.deleteCatalogueIDs.length],['新增文章',scene.plan.addArticles.length],['删除文章',scene.plan.deleteArticleIDs.length]].forEach(([label,count]) => {
+      const span = make('span', '', label + ' ');
+      span.append(make('b', '', String(count)));
+      counts.append(span);
+    });
+    document.querySelectorAll('[data-scenario]').forEach(button => button.setAttribute('aria-selected', String(Number(button.dataset.scenario) === sceneIndex)));
+    document.querySelectorAll('[data-aligned]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.aligned === 'true') === aligned)));
+  }
+  document.querySelectorAll('[data-scenario]').forEach(button => button.addEventListener('click', () => {
+    sceneIndex = Number(button.dataset.scenario);
+    render();
+  }));
+  document.querySelectorAll('[data-aligned]').forEach(button => button.addEventListener('click', () => {
+    aligned = button.dataset.aligned === 'true';
+    render();
+  }));
+  const tabs = [...document.querySelectorAll('[data-scenario]')];
+  tabs.forEach((button, index) => button.addEventListener('keydown', event => {
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
+  }));
+  async function copyText(value) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try { await navigator.clipboard.writeText(value); return; } catch (_) { /* 本地文件使用下面的兼容方案。 */ }
+    }
+    const field = make('textarea');
+    field.value = value;
+    field.style.position = 'fixed';
+    field.style.opacity = '0';
+    document.body.append(field);
+    field.select();
+    const ok = document.execCommand('copy');
+    field.remove();
+    if (!ok) throw new Error('copy failed');
+  }
+  document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
+    const source = document.getElementById(button.dataset.copy);
+    const value = source.textContent.replace(/\u00a0/g, ' ');
+    try {
+      await copyText(value);
+      button.textContent = '已复制';
+      document.getElementById('copy-status').textContent = '代码已复制到剪贴板';
+    } catch (_) {
+      button.textContent = '请手动选择';
+      document.getElementById('copy-status').textContent = '复制不可用，请手动选择代码';
+    }
+    setTimeout(() => { button.textContent = '复制代码'; }, 1800);
+  }));
+  document.getElementById('print-document').addEventListener('click', () => window.print());
+  const navLinks = [...document.querySelectorAll('.sidebar nav a')];
+  const sections = [...document.querySelectorAll('main section[id]')];
+  const progress = document.getElementById('reading-progress');
+  function updateReading() {
+    const available = document.documentElement.scrollHeight - window.innerHeight;
+    progress.style.width = (available > 0 ? Math.min(100, Math.max(0, window.scrollY / available * 100)) : 0) + '%';
+    let active = sections[0]?.id;
+    sections.forEach(section => { if (section.getBoundingClientRect().top <= 160) active = section.id; });
+    navLinks.forEach(link => {
+      const selected = link.getAttribute('href') === '#' + active;
+      link.classList.toggle('active', selected);
+      if (selected) link.setAttribute('aria-current', 'location'); else link.removeAttribute('aria-current');
+    });
+  }
+  window.addEventListener('scroll', updateReading, {passive:true});
+  window.addEventListener('resize', updateReading);
+  render();
+  updateReading();
+})();
+</script>
+</body>
+</html>

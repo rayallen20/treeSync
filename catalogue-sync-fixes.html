@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="description" content="treeSync 两项缺陷修复提案：拒绝非目录根路径，防止错误删除目录树；同步失败写入标准错误并返回非零退出码。包含完整代码、流程图和回归测试。">
+<title>目录同步：两项缺陷修复方案 | treeSync</title>
+<style>
+:root { --ink:#19352e; --text:#334b46; --muted:#61746d; --green:#17694f; --green-soft:#e6f2eb; --line:#dce4df; --paper:#fffefa; --bg:#f4f5f0; --red:#a33d43; --red-soft:#fbecef; --blue:#355a9a; --blue-soft:#eaf0fb; --code:#17251f; --radius:18px; }
+*{box-sizing:border-box} html{scroll-behavior:smooth;scroll-padding-top:40px} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.85;-webkit-font-smoothing:antialiased} a{color:var(--green);text-decoration:none} a:hover{text-decoration:underline} button{font:inherit;cursor:pointer} button:focus-visible,a:focus-visible,pre:focus-visible{outline:3px solid #b5d695;outline-offset:4px} ::selection{background:#c9e2cf} p{margin:0 0 16px} h1,h2,h3{color:var(--ink);line-height:1.4;letter-spacing:-.025em} h1{font-size:clamp(34px,4.4vw,56px);font-weight:720;margin:15px 0 23px} h2{font-size:27px;margin:0 0 15px} h3{font-size:18px;margin:0 0 9px} strong{font-weight:650;color:var(--ink)} code,pre,.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace} p code,li>code,td code,.inline-code{font-size:.9em;padding:2px 6px;border-radius:5px;background:#eaf0e8;color:#285545;overflow-wrap:anywhere} .progress-track{position:fixed;top:0;left:0;right:0;height:3px;z-index:50;background:transparent} .progress-track span{display:block;height:100%;width:0;background:var(--green)} .layout{max-width:1440px;margin:auto;display:grid;grid-template-columns:235px minmax(0,1fr);gap:54px;padding:0 48px}.sidebar{position:sticky;top:0;height:100vh;padding:49px 0 30px;display:flex;flex-direction:column}.brand{display:flex;align-items:center;gap:11px;color:var(--ink);font-size:19px;letter-spacing:-.025em;font-weight:750}.brand-mark{width:35px;height:35px;border-radius:10px;background:var(--green);display:grid;place-items:center;color:white}.sidebar-label{color:var(--muted);font-size:11px;letter-spacing:.13em;text-transform:uppercase;margin:35px 0 15px}.sidebar nav{display:flex;flex-direction:column;gap:5px}.sidebar nav a{display:flex;align-items:center;gap:12px;color:var(--muted);padding:8px 12px;border-radius:8px;font-size:14px;transition:background .15s,color .15s}.sidebar nav a span{font-size:11px;font-family:monospace;opacity:.65}.sidebar nav a.active{background:var(--green-soft);color:var(--green);font-weight:650}.sidebar nav a:hover{background:#eaf0e8;text-decoration:none}.sidebar-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:18px;font-size:12px;color:var(--muted)} .sidebar-foot code{font-size:11px}.main{min-width:0;padding-bottom:40px}.hero{padding:63px 0 40px;border-bottom:1px solid var(--line);position:relative}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.16em;color:var(--green);text-transform:uppercase}.hero-description{max-width:650px;font-size:17px;line-height:1.9;color:var(--muted)}.hero-meta{display:flex;gap:9px;flex-wrap:wrap;margin-top:26px}.pill{font-size:11px;color:var(--green);background:var(--green-soft);border:1px solid #d7e5d9;border-radius:99px;padding:3px 10px}.print-button{position:absolute;right:0;top:64px;border:1px solid var(--line);background:var(--paper);border-radius:9px;padding:6px 13px;font-size:12px;color:var(--muted)} section{padding-top:52px;scroll-margin-top:26px}.section-top{display:flex;align-items:center;gap:12px;margin-bottom:16px}.section-index{font:12px monospace;border:1px solid #cbd8cb;color:var(--green);border-radius:99px;width:31px;height:31px;display:grid;place-items:center}.section-top h2{margin:0}.section-intro{max-width:790px;color:var(--muted)}.card{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:24px}.callout{padding:17px 20px;background:#eaf2e8;border-left:3px solid var(--green);border-radius:0 10px 10px 0;font-size:14px;margin:23px 0}.callout p:last-child{margin-bottom:0}.callout.neutral{background:#f0f1eb;border-left-color:#a5aa7e}.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:13px;background:var(--paper)}table{border-collapse:collapse;width:100%;font-size:14px}th,td{padding:15px 18px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}th{background:#edf1e9;color:#435e50;font-size:12px;font-weight:650;white-space:nowrap}tr:last-child td{border-bottom:0}.status{font-size:11px;border-radius:99px;padding:3px 8px;display:inline-block;white-space:nowrap}.status.add{color:var(--green);background:var(--green-soft)}.status.delete{color:var(--red);background:var(--red-soft)}.status.keep{color:var(--blue);background:var(--blue-soft)}.rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-top:18px}.rule-grid .card{padding:20px}.rule-grid p{font-size:13px;color:var(--muted);margin:0}.formula{font:13px "SFMono-Regular",Consolas,monospace;padding:13px 16px;background:#edf2e9;border:1px dashed #b5c9af;border-radius:10px;text-align:center;color:var(--green);margin:20px 0}.scenario-panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);overflow:hidden;margin-top:23px}.scenario-toolbar{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}.scenario-tabs,.alignment-switch{display:flex;gap:4px;flex-wrap:wrap}.scenario-tabs button{border:0;background:transparent;padding:7px 10px;border-radius:7px;font-size:12px;color:var(--muted)}.scenario-tabs button[aria-selected=true]{background:var(--green);color:white}.alignment-switch{background:#edf1ea;padding:3px;border-radius:7px}.alignment-switch button{border:0;background:transparent;color:var(--muted);font-size:11px;padding:4px 8px;border-radius:5px}.alignment-switch button[aria-pressed=true]{background:white;color:var(--green);box-shadow:0 1px 3px #10281a10}.scenario-description{padding:18px 23px 0;font-size:13px;color:var(--muted);margin:0}.tree-pair{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:20px 14px}.tree-pane{padding:0 9px;min-width:0}.tree-pane+.tree-pane{border-left:1px dashed var(--line)}.tree-pane-heading{display:flex;justify-content:space-between;align-items:baseline;margin:0 4px 16px;gap:10px;font-size:13px;color:var(--ink);font-weight:650}.tree-pane-heading small{font-size:10px;font-weight:400;color:var(--muted);letter-spacing:.02em}.tree-root,.tree-root ul{list-style:none;margin:0;padding-left:19px}.tree-root{padding-left:0}.tree-root ul{margin-left:11px;border-left:1px solid #d2dbd3}.tree-root li{position:relative;margin-top:8px}.tree-root ul>li:before{position:absolute;content:"";width:13px;left:-19px;top:24px;border-top:1px solid #d2dbd3}.tree-node{display:flex;gap:8px;align-items:flex-start;padding:9px 9px;border-radius:9px;border:1px solid transparent;min-width:0}.state-keep{background:#f0f4fb;border-color:#e1e8f5}.state-add{background:var(--green-soft);border-color:#cce1d2}.state-delete{background:var(--red-soft);border-color:#f0d9dd}.node-symbol{font-size:18px;color:#6a8271;line-height:1.3;flex-shrink:0}.node-body{min-width:0;flex:1}.node-name{font-size:12px;line-height:1.5;display:block;overflow-wrap:anywhere;color:var(--ink);font-weight:550}.node-meta{font:10px/1.7 "SFMono-Regular",Consolas,monospace;color:var(--muted);display:block;margin-top:4px;overflow-wrap:anywhere}.article-id{display:inline-block;margin-left:3px;white-space:nowrap}.node-badge{font-size:9px;border-radius:4px;padding:1px 4px;flex-shrink:0;margin-top:1px}.state-keep .node-badge{color:var(--blue);background:#e0e8f8}.state-add .node-badge{color:var(--green);background:#cde5d7}.state-delete .node-badge{color:var(--red);background:#f2d7dc}.legend{display:flex;gap:15px;flex-wrap:wrap;padding:0 24px 20px;font-size:11px;color:var(--muted)}.legend span:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:var(--blue)}.legend .legend-add:before{background:var(--green)}.legend .legend-delete:before{background:var(--red)}.plan-preview{background:#f6f7f2;border-top:1px solid var(--line);padding:20px 23px}.plan-title{font-size:12px;color:var(--ink);font-weight:650;margin-bottom:12px}.plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.plan-item{background:white;border:1px solid #e3e8df;border-radius:8px;padding:10px 12px;min-width:0}.plan-key{font:10px "SFMono-Regular",Consolas,monospace;color:var(--muted);display:block;margin-bottom:5px}.plan-value{font:11px/1.8 "SFMono-Regular",Consolas,monospace;color:var(--ink);display:block;overflow-wrap:anywhere}.plan-note{font-size:12px;color:var(--green);margin:13px 0 0}.report-preview{display:flex;gap:16px;flex-wrap:wrap;margin-top:13px;font-size:11px;color:var(--muted)}.report-preview b{font-weight:650;color:var(--ink);font-family:monospace}.flow-diagram{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:24px 0}.flow-step{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:18px 15px}.flow-step:not(:last-child):after{content:"→";position:absolute;right:-14px;top:37px;color:#94ab96;z-index:1;background:var(--bg);line-height:1}.flow-step small{font:10px monospace;color:var(--green);display:block;margin-bottom:9px}.flow-step strong{font-size:13px;display:block;margin-bottom:5px}.flow-step p{font-size:11px;line-height:1.8;color:var(--muted);margin:0}.split-explanation{display:grid;grid-template-columns:1fr 1fr;gap:18px}.split-explanation p{font-size:13px;color:var(--muted);margin:0}.mini-label{font:10px monospace;color:var(--green);letter-spacing:.08em;margin-bottom:8px}.code-section{margin-top:31px}.code-section>h3{margin-bottom:9px}.code-section>p{font-size:14px;color:var(--muted)}.code-window{margin:18px 0 24px;border:1px solid #293b31;border-radius:13px;overflow:hidden;background:var(--code);box-shadow:0 7px 22px #203b2607}.code-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 16px;background:#213329;border-bottom:1px solid #35473b;color:#d4e2d5;font:11px/1.5 "SFMono-Regular",Consolas,monospace}.code-toolbar>span{display:flex;align-items:center;gap:8px}.code-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#8ebf8b}.code-actions{display:flex;align-items:center;gap:15px;flex-shrink:0}.line-count{color:#8fa492;font-size:10px}.copy-button{border:1px solid #516655;background:transparent;border-radius:5px;color:#d1e2cf;font-size:10px;line-height:1.6;padding:3px 9px}.copy-button:hover{background:#304837}pre{margin:0;overflow:auto;max-width:100%;tab-size:4;overscroll-behavior-x:contain}pre code{display:block;white-space:normal;font-size:12px;line-height:1.85;color:#e5ece0;padding:17px 0}.code-line{position:relative;display:block;white-space:pre;min-height:1.85em;padding:0 22px 0 62px}.code-line:before{content:attr(data-line);position:absolute;left:15px;width:28px;text-align:right;color:#718573;font-size:10px;line-height:2.22;user-select:none}.tok-keyword{color:#b7d6fa}.tok-string{color:#dceba3}.tok-comment{color:#91aa95}.tok-number{color:#efc49a}.detail-box{border:1px solid var(--line);border-radius:12px;background:var(--paper);padding:0 18px;margin-top:17px}details summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);padding:15px 0}details[open] summary{border-bottom:1px solid var(--line);margin-bottom:15px}details p,details li{font-size:13px}.detail-box ul{padding-left:20px;margin-bottom:18px}.transaction-box{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:25px;margin:22px 0}.tx-boundary{font:11px monospace;color:var(--green);display:flex;justify-content:space-between;align-items:center;padding-bottom:17px;border-bottom:1px dashed #cad8cb}.tx-list{list-style:none;padding:7px 0 0;margin:0;counter-reset:tx}.tx-list li{position:relative;padding:15px 0 15px 49px;counter-increment:tx;border-bottom:1px solid #edf0e9;font-size:13px}.tx-list li:last-child{border-bottom:0}.tx-list li:before{content:counter(tx,decimal-leading-zero);position:absolute;left:0;top:19px;font:11px monospace;width:29px;height:29px;border:1px solid #d8e3d7;background:#f3f7f0;border-radius:9px;display:grid;place-items:center;color:var(--green)}.tx-list small{display:block;color:var(--muted);font-size:12px;margin-top:3px}.tx-commit{margin-top:15px;display:flex;justify-content:space-between;gap:14px;font-size:12px}.tx-success{color:var(--green)}.tx-fail{color:var(--red)}.boundary-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.boundary-grid .card{padding:20px}.boundary-grid h3{font-size:15px}.boundary-grid p{font-size:13px;color:var(--muted);margin:0}.source-links{display:flex;gap:12px 22px;flex-wrap:wrap;font-size:12px;margin:22px 0 0;padding:0;list-style:none}.footer{margin-top:45px;padding:23px 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:15px;font-size:11px;color:var(--muted)}.footer code{font-size:10px}.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.mobile-brand{display:none} noscript p{padding:15px;background:#f7eee0;border-radius:9px;font-size:13px}
+@media(min-width:1500px){.layout{gap:68px;grid-template-columns:250px minmax(0,1fr)}}
+@media(max-width:1100px){.layout{padding:0 28px;grid-template-columns:190px minmax(0,1fr);gap:30px}.tree-pair{grid-template-columns:1fr;gap:25px}.tree-pane+.tree-pane{border-left:0;border-top:1px dashed var(--line);padding-top:21px}.flow-diagram{grid-template-columns:1fr 1fr}.flow-step:nth-child(2):after{display:none}.print-button{top:40px}.hero{padding-top:40px}.line-count{display:none}}
+@media(max-width:760px){html{scroll-padding-top:20px}.layout{display:block;padding:0 20px}.sidebar{display:none}.mobile-brand{display:flex;padding-top:24px;font-size:15px}.mobile-brand .brand-mark{width:29px;height:29px;border-radius:8px}.hero{padding-top:26px}.hero h1{font-size:36px;max-width:500px}.hero-description{font-size:15px}.print-button{position:static;margin-top:19px}.hero-meta{margin-top:20px}section{padding-top:38px}.section-top h2{font-size:23px}.rule-grid,.split-explanation,.boundary-grid{grid-template-columns:1fr}.plan-grid{grid-template-columns:1fr}.scenario-toolbar{padding:14px}.scenario-tabs button{font-size:11px;padding:6px 8px}.alignment-switch button{font-size:10px}.scenario-description{padding:17px 17px 0}.tree-pair{padding:18px 9px}.plan-preview{padding:18px 17px}.flow-diagram{gap:12px}.flow-step{padding:16px 13px}.flow-step:not(:last-child):after{right:-11px}.flow-step:nth-child(2):after{display:none}.code-toolbar{padding:11px 12px;font-size:10px;gap:8px}.code-actions{gap:0}.copy-button{font-size:10px;white-space:nowrap}.code-line{padding-left:48px;padding-right:16px}.code-line:before{left:8px;width:25px}pre code{font-size:11px}.card{padding:20px}th,td{padding:12px 13px}.table-scroll table{min-width:530px}.transaction-box{padding:20px}.tx-commit,.footer{flex-direction:column;gap:6px}.footer{margin-top:35px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+@media print{body{background:white;font-size:11px;color:#222}.layout{display:block;max-width:none;padding:0}.sidebar,.progress-track,.print-button,.copy-button,.scenario-tabs,.alignment-switch,.mobile-brand{display:none!important}.hero{padding:0 0 20px}h1{font-size:30px;margin:10px 0 15px}h2{font-size:21px}section{padding-top:26px}.hero-description{font-size:13px}.pill{font-size:9px}.tree-pair{grid-template-columns:1fr 1fr}.tree-pane+.tree-pane{border-left:1px dashed #ccc;border-top:0;padding-top:0}.flow-diagram{grid-template-columns:repeat(4,1fr)}.code-window{box-shadow:none;background:#f8faf7;border-color:#c7d1c4;break-inside:auto}.code-toolbar{background:#ecf1e9;color:#233d2b;border-color:#c7d1c4}.code-toolbar .code-dot,.line-count{display:none}.code-line{white-space:pre-wrap;overflow-wrap:anywhere;padding-left:40px;break-inside:avoid}.code-line:before{left:4px;color:#637362}.tok-keyword{color:#305489}.tok-string{color:#426c29}.tok-comment{color:#667d65}.tok-number{color:#8b6138}pre code{color:#243a2a;font-size:9px}pre{overflow:visible}.card,.rule-grid,.boundary-grid,.transaction-box,.scenario-panel{break-inside:avoid}a{color:inherit}details{display:block}.footer{margin-top:25px}h2,h3,.code-toolbar{break-after:avoid}.section-intro{font-size:12px}.plan-grid{grid-template-columns:1fr 1fr}}
+
+.fix-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:23px 0}.fix-grid p{font-size:13px;color:var(--muted);margin:9px 0 0}.priority{font:600 11px monospace;padding:4px 7px;border-radius:6px;display:inline-block;margin-bottom:11px}.p1{color:#9e3941;background:#f8e5e7}.p2{color:#956021;background:#fff0d5}.flow-caption{font-size:13px;color:var(--muted);font-weight:650;margin:23px 0 0}.flow-diagram.before .flow-step{background:#fffafa;border-color:#e7cdcf}.flow-diagram.before .flow-step small{color:var(--red)}.flow-diagram.after .flow-step{background:#fafff8;border-color:#c8dec8}.result-badge{display:inline-block;white-space:nowrap;font-size:11px;color:var(--green);background:var(--green-soft);padding:3px 9px;border-radius:99px}.file-list{list-style:none;padding:0;display:grid;gap:10px;margin:20px 0}.file-list li{display:grid;grid-template-columns:185px 1fr;gap:15px;border:1px solid var(--line);border-radius:10px;background:var(--paper);padding:13px 16px;font-size:13px}.file-list code{font-size:11px;background:transparent;padding:0}.small-note{font-size:12px;color:var(--muted)}.facts{display:flex;gap:9px;flex-wrap:wrap;margin:20px 0}.facts span{font-size:11px;color:var(--green);padding:4px 10px;border:1px solid #d4e3cc;background:#eef6e9;border-radius:99px}.command{font:12px/1.9 "SFMono-Regular",Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#edf3e8;padding:16px 18px;border-radius:10px;border:1px solid #d0ddc9;color:var(--green)}.step-list{padding-left:23px}.step-list li{margin:11px 0;font-size:14px}.back-link{display:block;margin-top:16px;font-size:12px}
+@media(max-width:760px){.fix-grid{grid-template-columns:1fr}.file-list li{grid-template-columns:1fr;gap:6px}}
+@media print{.fix-grid{grid-template-columns:1fr 1fr}.fix-grid .card,.file-list li{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="progress-track" aria-hidden="true"><span id="reading-progress"></span></div>
+<div class="layout">
+<aside class="sidebar" aria-label="修复方案导航">
+  <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">↳</span>treeSync<span style="font-size:12px;font-weight:400;color:#7b8b7d">/ fixes</span></a>
+  <p class="sidebar-label">目录同步 · 两项修复提案</p>
+  <nav><a href="#overview" class="active"><span>01</span>问题与修复范围</a><a href="#root-validation"><span>02</span>P1 · 根路径校验</a><a href="#exit-status"><span>03</span>P2 · 失败退出状态</a><a href="#verification"><span>04</span>测试与验证结果</a><a href="#integration"><span>05</span>接入顺序与验收</a></nav>
+  <div class="sidebar-foot">单文件 · 可离线打开<br>代码可复制 · 支持打印<a class="back-link" href="catalogue-tree-compare.html">← 原目录树同步方案</a></div>
+</aside>
+<main class="main" id="top">
+  <div class="brand mobile-brand"><span class="brand-mark" aria-hidden="true">↳</span>treeSync / fixes</div>
+  <header class="hero"><div class="eyebrow">Fix proposal / Scan root + Exit status</div><h1>挡住错误扫描，<br>让失败正确退出</h1><p class="hero-description">补齐扫描根路径的类型校验，阻止无效输入被当作空树；同步失败时使用标准错误输出和退出码 1，让调用方正确识别结果。</p><div class="hero-meta"><span class="pill">P1 · 防止错误删树</span><span class="pill">P2 · stderr + exit 1</span><span class="pill">临时副本验证通过</span><span class="pill">Go 文件未改动</span></div><button type="button" class="print-button" id="print-document">打印 / 另存为 PDF ↗</button></header>
+
+  <section id="overview" aria-labelledby="overview-title"><div class="section-top"><span class="section-index">01</span><h2 id="overview-title">两个问题，需要分别处理</h2></div><p class="section-intro">P1 让无效扫描输入返回错误，P2 把错误以正确的进程状态传给调用方。两项修复共同完成从输入检查到失败报告的链路。</p>
+    <div class="fix-grid"><div class="card"><span class="priority p1">P1 / 数据正确性</span><h3>非目录被当成空树</h3><p>普通文件也会进入 WalkDir 的根回调。当前代码直接跳过根节点，可能成功返回空列表，使比较逻辑把原树后代及文章全部判为删除。</p></div><div class="card"><span class="priority p2">P2 / 失败可见性</span><h3>失败仍以状态 0 结束</h3><p>book.Build() 失败后，main 使用标准输出打印错误并正常返回。脚本或定时任务收到的退出码仍为成功。</p></div></div>
+    <ul class="file-list"><li><code>scan/scan.go</code><span>先拒绝空字符串，再统一根路径表示方式。</span></li><li><code>scan/walker.go</code><span>在根回调中检查 d.IsDir()，类型不符立即返回错误。</span></li><li><code>main.go</code><span>同步错误写入 os.Stderr，随后调用 os.Exit(1)。</span></li></ul>
+    <p class="small-note">这是修复提案。下方代码已应用到临时项目副本进行验证；本次任务没有修改你的现有 Go 文件。</p>
+  </section>
+
+  <section id="root-validation" aria-labelledby="root-title"><div class="section-top"><span class="section-index">02</span><h2 id="root-title">P1：在扫描流程中验证根路径类型</h2></div><p class="section-intro">WalkDir 会把根路径本身交给回调，且不自动跟随软链接。根回调应先处理访问错误，再判断这个扫描入口是否是真实目录。</p>
+    <p class="flow-caption">修复前 · 以普通文件作为扫描根路径</p><div class="flow-diagram before" role="img" aria-label="普通文件进入扫描，根节点被跳过，返回空列表，新树只剩根节点，事务提交删除旧目录后代及其文章。"><div class="flow-step"><small>INPUT</small><strong>普通文件路径</strong><p>例如 chapter.md。</p></div><div class="flow-step"><small>SCAN</small><strong>空列表 / nil 错误</strong><p>根回调直接返回。</p></div><div class="flow-step"><small>COMPARE</small><strong>旧后代全部消失</strong><p>目录和文章进入删除清单。</p></div><div class="flow-step"><small>COMMIT</small><strong>提交错误删除</strong><p>外层还会报告同步成功。</p></div></div>
+    <p class="flow-caption">修复后 · 在比较和写入之前停止</p><div class="flow-diagram after" role="img" aria-label="根路径类型检查失败，扫描返回错误，业务层停止比较和写入，main 将错误写入stderr并以退出码1结束。"><div class="flow-step"><small>INPUT</small><strong>普通文件路径</strong><p>与上方相同的输入。</p></div><div class="flow-step"><small>SCAN</small><strong>IsDir() 为 false</strong><p>返回明确的扫描错误。</p></div><div class="flow-step"><small>BIZ</small><strong>停止比较与落盘</strong><p>本次任务写入 0 次。</p></div><div class="flow-step"><small>MAIN</small><strong>stderr / exit 1</strong><p>调用方得到失败状态。</p></div></div>
+    <div class="code-section"><h3>步骤 A：更新 scan/scan.go</h3><p>下面是完整文件参考。先检查空字符串，再调用 <code>filepath.Clean()</code>。<code>Clean("")</code> 会得到 <code>"."</code>，顺序相反会把缺失参数意外变成当前目录。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>scan/scan.go · 完整文件</span><div class="code-actions"><span class="line-count">29 行 · Go</span><button type="button" class="copy-button" data-copy="code-scan">复制代码</button></div></div><pre tabindex="0" aria-label="scan/scan.go · 完整文件"><code id="code-scan"><span class="code-line" data-line="1"><span class="tok-keyword">package</span> scan</span>
+<span class="code-line" data-line="2"></span>
+<span class="code-line" data-line="3"><span class="tok-keyword">import</span> (</span>
+<span class="code-line" data-line="4">	<span class="tok-string">&quot;fmt&quot;</span></span>
+<span class="code-line" data-line="5">	<span class="tok-string">&quot;path/filepath&quot;</span></span>
+<span class="code-line" data-line="6">)</span>
+<span class="code-line" data-line="7"></span>
+<span class="code-line" data-line="8"><span class="tok-comment">// Dir 本函数用于递归遍历给定的目录,返回所有普通文件的路径列表.该路径列表为相对给定目录 dir 的路径,分隔符统一为 /</span></span>
+<span class="code-line" data-line="9"><span class="tok-comment">// Tips:</span></span>
+<span class="code-line" data-line="10"><span class="tok-comment">// 1. 在递归过程中,会跳过隐藏项</span></span>
+<span class="code-line" data-line="11"><span class="tok-comment">// 2. 在递归过程中,会跳过符号链接</span></span>
+<span class="code-line" data-line="12"><span class="tok-keyword">func</span> Dir(dir <span class="tok-keyword">string</span>) ([]<span class="tok-keyword">string</span>, <span class="tok-keyword">error</span>) {</span>
+<span class="code-line" data-line="13">	<span class="tok-comment">// 必须在 Clean 之前判断；Clean(&quot;&quot;) 会得到 &quot;.&quot;。</span></span>
+<span class="code-line" data-line="14">	<span class="tok-keyword">if</span> dir == <span class="tok-string">&quot;&quot;</span> {</span>
+<span class="code-line" data-line="15">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, fmt.Errorf(<span class="tok-string">&quot;扫描根路径不能为空&quot;</span>)</span>
+<span class="code-line" data-line="16">	}</span>
+<span class="code-line" data-line="17">	dir = filepath.Clean(dir)</span>
+<span class="code-line" data-line="18"></span>
+<span class="code-line" data-line="19">	w := &amp;walker{</span>
+<span class="code-line" data-line="20">		root: dir,</span>
+<span class="code-line" data-line="21">	}</span>
+<span class="code-line" data-line="22"></span>
+<span class="code-line" data-line="23">	err := filepath.WalkDir(dir, w.visit)</span>
+<span class="code-line" data-line="24">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="25">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, fmt.Errorf(<span class="tok-string">&quot;扫描目录失败: %w&quot;</span>, err)</span>
+<span class="code-line" data-line="26">	}</span>
+<span class="code-line" data-line="27"></span>
+<span class="code-line" data-line="28">	<span class="tok-keyword">return</span> w.files, <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="29">}</span></code></pre></div></div>
+    <div class="code-section"><h3>步骤 B：更新 scan/walker.go</h3><p>在导入中增加 <code>fmt</code>，并替换原来“根节点直接返回”的分支。下面给出完整文件参考；访问错误仍在函数最前面处理。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>scan/walker.go · 完整文件</span><div class="code-actions"><span class="line-count">62 行 · Go</span><button type="button" class="copy-button" data-copy="code-walker">复制代码</button></div></div><pre tabindex="0" aria-label="scan/walker.go · 完整文件"><code id="code-walker"><span class="code-line" data-line="1"><span class="tok-keyword">package</span> scan</span>
+<span class="code-line" data-line="2"></span>
+<span class="code-line" data-line="3"><span class="tok-keyword">import</span> (</span>
+<span class="code-line" data-line="4">	<span class="tok-string">&quot;fmt&quot;</span></span>
+<span class="code-line" data-line="5">	<span class="tok-string">&quot;io/fs&quot;</span></span>
+<span class="code-line" data-line="6">	<span class="tok-string">&quot;path/filepath&quot;</span></span>
+<span class="code-line" data-line="7">	<span class="tok-string">&quot;strings&quot;</span></span>
+<span class="code-line" data-line="8">)</span>
+<span class="code-line" data-line="9"></span>
+<span class="code-line" data-line="10"><span class="tok-comment">// walker 本结构体表示一次目录树扫描的遍历状态</span></span>
+<span class="code-line" data-line="11"><span class="tok-keyword">type</span> walker <span class="tok-keyword">struct</span> {</span>
+<span class="code-line" data-line="12">	root  <span class="tok-keyword">string</span>   <span class="tok-comment">// root 被扫描的根目录 用于识别根目录自身和生成相对路径</span></span>
+<span class="code-line" data-line="13">	files []<span class="tok-keyword">string</span> <span class="tok-comment">// files 扫描出的所有普通文件的相对路径列表</span></span>
+<span class="code-line" data-line="14">}</span>
+<span class="code-line" data-line="15"></span>
+<span class="code-line" data-line="16"><span class="tok-comment">// visit 本方法用于处理 filepath.WalkDir 的回调逻辑,并将扫描出的普通文件路径收集到 walker.files 中</span></span>
+<span class="code-line" data-line="17"><span class="tok-keyword">func</span> (w *walker) visit(path <span class="tok-keyword">string</span>, d fs.DirEntry, err <span class="tok-keyword">error</span>) <span class="tok-keyword">error</span> {</span>
+<span class="code-line" data-line="18">	<span class="tok-comment">// WalkDir 自身读取出错 则直接终止 不产出结果</span></span>
+<span class="code-line" data-line="19">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="20">		<span class="tok-keyword">return</span> err</span>
+<span class="code-line" data-line="21">	}</span>
+<span class="code-line" data-line="22"></span>
+<span class="code-line" data-line="23">	<span class="tok-comment">// 根路径必须是实际目录。普通文件、根软链接等都返回错误。</span></span>
+<span class="code-line" data-line="24">	<span class="tok-keyword">if</span> path == w.root {</span>
+<span class="code-line" data-line="25">		<span class="tok-keyword">if</span> !d.IsDir() {</span>
+<span class="code-line" data-line="26">			<span class="tok-keyword">return</span> fmt.Errorf(<span class="tok-string">&quot;扫描根路径必须是实际目录: %q&quot;</span>, path)</span>
+<span class="code-line" data-line="27">		}</span>
+<span class="code-line" data-line="28">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="29">	}</span>
+<span class="code-line" data-line="30"></span>
+<span class="code-line" data-line="31">	<span class="tok-comment">// 跳过隐藏项 (目录整枝跳过 文件单个跳过)</span></span>
+<span class="code-line" data-line="32">	<span class="tok-keyword">if</span> strings.HasPrefix(d.Name(), <span class="tok-string">&quot;.&quot;</span>) {</span>
+<span class="code-line" data-line="33">		<span class="tok-keyword">if</span> d.IsDir() {</span>
+<span class="code-line" data-line="34">			<span class="tok-keyword">return</span> filepath.SkipDir</span>
+<span class="code-line" data-line="35">		}</span>
+<span class="code-line" data-line="36"></span>
+<span class="code-line" data-line="37">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="38">	}</span>
+<span class="code-line" data-line="39"></span>
+<span class="code-line" data-line="40">	<span class="tok-comment">// 跳过符号链接</span></span>
+<span class="code-line" data-line="41">	<span class="tok-keyword">if</span> d.Type()&amp;fs.ModeSymlink != <span class="tok-number">0</span> {</span>
+<span class="code-line" data-line="42">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="43">	}</span>
+<span class="code-line" data-line="44"></span>
+<span class="code-line" data-line="45">	<span class="tok-comment">// 目录本身不产出</span></span>
+<span class="code-line" data-line="46">	<span class="tok-keyword">if</span> d.IsDir() {</span>
+<span class="code-line" data-line="47">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="48">	}</span>
+<span class="code-line" data-line="49"></span>
+<span class="code-line" data-line="50">	<span class="tok-comment">// 非普通文件(设备文件/socket)跳过</span></span>
+<span class="code-line" data-line="51">	<span class="tok-keyword">if</span> !d.Type().IsRegular() {</span>
+<span class="code-line" data-line="52">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="53">	}</span>
+<span class="code-line" data-line="54"></span>
+<span class="code-line" data-line="55">	rel, err := filepath.Rel(w.root, path)</span>
+<span class="code-line" data-line="56">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="57">		<span class="tok-keyword">return</span> err</span>
+<span class="code-line" data-line="58">	}</span>
+<span class="code-line" data-line="59">	w.files = append(w.files, filepath.ToSlash(rel))</span>
+<span class="code-line" data-line="60"></span>
+<span class="code-line" data-line="61">	<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span></span>
+<span class="code-line" data-line="62">}</span></code></pre></div></div>
+    <div class="callout"><p><strong>合法空目录仍然允许同步。</strong> 空结果本身不代表错误。真实空目录成功返回空列表后，按镜像同步规则删除旧后代是有效操作。应拒绝的是错误的根路径类型。</p></div>
+    <div class="fix-grid"><div class="card"><h3>根软链接的处理</h3><p>沿用原有跳过软链接的规则，根路径本身是软链接时明确返回错误。先规范化路径，也能统一处理结尾带 / 或 /. 的输入。</p></div><div class="card"><h3>已有扫描行为</h3><p>目录内部的隐藏项、软链接、非普通文件继续按已有规则跳过；隐藏根目录仍可扫描。原有扫描测试已一起运行。</p></div></div>
+    <p class="small-note">这项修复校验扫描根节点类型，不提供文件系统内容的原子快照，也不等同于禁止所有中间路径组件中的软链接。</p>
+  </section>
+
+  <section id="exit-status" aria-labelledby="exit-title"><div class="section-top"><span class="section-index">03</span><h2 id="exit-title">P2：让业务失败以非零状态退出</h2></div><p class="section-intro">将 book.Build() 后的错误分支改成标准错误输出和 os.Exit(1)，与初始化失败时已有的处理方式一致。</p>
+    <div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>main.go · 业务错误分支</span><div class="code-actions"><span class="line-count">4 行 · Go</span><button type="button" class="copy-button" data-copy="code-main-error">复制代码</button></div></div><pre tabindex="0" aria-label="main.go · 业务错误分支"><code id="code-main-error"><span class="code-line" data-line="1"><span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="2">		fmt.Fprintf(os.Stderr, <span class="tok-string">&quot;构建书籍目录失败: %v\n&quot;</span>, err)</span>
+<span class="code-line" data-line="3">		os.Exit(<span class="tok-number">1</span>)</span>
+<span class="code-line" data-line="4">	}</span></code></pre></div>
+    <div class="table-scroll"><table><thead><tr><th scope="col">结果</th><th scope="col">输出位置</th><th scope="col">退出码</th></tr></thead><tbody><tr><td>初始化失败</td><td><code>stderr</code></td><td><code>1</code></td></tr><tr><td>扫描、构树、比较或数据库写入失败</td><td><code>stderr</code></td><td><code>1</code></td></tr><tr><td>同步成功，输出变更报告</td><td><code>stdout</code></td><td><code>0</code></td></tr></tbody></table></div>
+    <div class="code-section"><h3>完整 main() 参考</h3><p>替换 main() 函数即可，沿用文件中现有的导入和 run() 初始化实现。所用 fmt、os 已经存在。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>main.go · main()</span><div class="code-actions"><span class="line-count">25 行 · Go</span><button type="button" class="copy-button" data-copy="code-main">复制代码</button></div></div><pre tabindex="0" aria-label="main.go · main()"><code id="code-main"><span class="code-line" data-line="1"><span class="tok-keyword">func</span> main() {</span>
+<span class="code-line" data-line="2">	err := run()</span>
+<span class="code-line" data-line="3">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="4">		fmt.Fprintf(os.Stderr, <span class="tok-string">&quot;%v\n&quot;</span>, err)</span>
+<span class="code-line" data-line="5">		os.Exit(<span class="tok-number">1</span>)</span>
+<span class="code-line" data-line="6">	}</span>
+<span class="code-line" data-line="7"></span>
+<span class="code-line" data-line="8">	path := flag.String(<span class="tok-string">&quot;path&quot;</span>, <span class="tok-string">&quot;&quot;</span>, <span class="tok-string">&quot;待处理的目录路径 (必填)&quot;</span>)</span>
+<span class="code-line" data-line="9">	bookID := flag.Int64(<span class="tok-string">&quot;bookID&quot;</span>, <span class="tok-number">0</span>, <span class="tok-string">&quot;书籍ID (必填, 正整数)&quot;</span>)</span>
+<span class="code-line" data-line="10">	flag.Parse()</span>
+<span class="code-line" data-line="11"></span>
+<span class="code-line" data-line="12">	book := &amp;biz.Book{}</span>
+<span class="code-line" data-line="13">	report, err := book.Build(*bookID, *path)</span>
+<span class="code-line" data-line="14">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="15">		fmt.Fprintf(os.Stderr, <span class="tok-string">&quot;构建书籍目录失败: %v\n&quot;</span>, err)</span>
+<span class="code-line" data-line="16">		os.Exit(<span class="tok-number">1</span>)</span>
+<span class="code-line" data-line="17">	}</span>
+<span class="code-line" data-line="18"></span>
+<span class="code-line" data-line="19">	fmt.Printf(<span class="tok-string">&quot;构建书籍目录成功:\n&quot;</span>)</span>
+<span class="code-line" data-line="20">	fmt.Printf(<span class="tok-string">&quot;书籍ID: %d\n&quot;</span>, book.ID)</span>
+<span class="code-line" data-line="21">	fmt.Printf(<span class="tok-string">&quot;新增目录数: %d\n&quot;</span>, report.CatalogueReport.AddItemQuantity)</span>
+<span class="code-line" data-line="22">	fmt.Printf(<span class="tok-string">&quot;删除目录数: %d\n&quot;</span>, report.CatalogueReport.DeleteItemQuantity)</span>
+<span class="code-line" data-line="23">	fmt.Printf(<span class="tok-string">&quot;新增文章数: %d\n&quot;</span>, report.ArticleReport.AddItemQuantity)</span>
+<span class="code-line" data-line="24">	fmt.Printf(<span class="tok-string">&quot;删除文章数: %d\n&quot;</span>, report.ArticleReport.DeleteItemQuantity)</span>
+<span class="code-line" data-line="25">}</span></code></pre></div></div>
+    <div class="callout"><p><strong>进程退出放在 main 层。</strong> os.Exit() 会立即终止进程，尚未执行的 defer 不会运行。model / biz 层继续返回错误；事务函数返回时先完成自己的回滚清理，main 再打印错误并退出。</p></div>
+    <p>只修复退出码还不能挡住 P1：如果扫描没有返回错误，main 根本不会进入失败分支。因此两项修复都需要接入。</p>
+  </section>
+
+  <section id="verification" aria-labelledby="verification-title"><div class="section-top"><span class="section-index">04</span><h2 id="verification-title">回归测试与验证结果</h2></div><p class="section-intro">方案已在临时副本中通过测试，包括之前复现误删的业务场景。数据库由内存 SQL 驱动替代，退出码使用独立编译的进程验证。</p>
+    <div class="facts"><span>临时副本 go test ./... 通过</span><span>无效输入的数据库写入为 0</span><span>3 个进程退出场景通过</span><span>未连接真实数据库</span></div>
+    <div class="table-scroll"><table><thead><tr><th scope="col">用例</th><th scope="col">修复后预期</th><th scope="col">验证</th></tr></thead><tbody><tr><td>普通文件作为根路径</td><td>返回错误，不提交对旧目录与文章的删除。</td><td><span class="result-badge">已通过</span></td></tr><tr><td>根软链接、结尾带 /、结尾带 /.</td><td>明确拒绝，根路径规则一致。</td><td><span class="result-badge">已通过</span></td></tr><tr><td>空路径 / 不存在的路径</td><td>返回错误，空字符串不会变成当前目录。</td><td><span class="result-badge">已通过</span></td></tr><tr><td>合法空目录</td><td>成功返回空结果，允许按规则同步。</td><td><span class="result-badge">已通过</span></td></tr><tr><td>普通目录、相对路径输出、原有扫描规则</td><td>正常扫描并保留相对路径形式。</td><td><span class="result-badge">已通过</span></td></tr><tr><td>同步失败的独立进程</td><td>stdout 为空，stderr 有错误，退出码为 1。</td><td><span class="result-badge">已通过</span></td></tr><tr><td>初始化失败 / 正常成功的独立进程</td><td>失败为 stderr / 1，成功为 stdout / 0。</td><td><span class="result-badge">已通过</span></td></tr></tbody></table></div>
+    <div class="code-section"><h3>可加入项目的扫描回归测试</h3><p>建议保存为 <code>scan/root_validation_test.go</code>。用例只创建临时文件和目录，不需要数据库。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>scan/root_validation_test.go</span><div class="code-actions"><span class="line-count">68 行 · Go</span><button type="button" class="copy-button" data-copy="code-scan-tests">复制代码</button></div></div><pre tabindex="0" aria-label="scan/root_validation_test.go"><code id="code-scan-tests"><span class="code-line" data-line="1"><span class="tok-keyword">package</span> scan_test</span>
+<span class="code-line" data-line="2"></span>
+<span class="code-line" data-line="3"><span class="tok-keyword">import</span> (</span>
+<span class="code-line" data-line="4">	<span class="tok-string">&quot;os&quot;</span></span>
+<span class="code-line" data-line="5">	<span class="tok-string">&quot;path/filepath&quot;</span></span>
+<span class="code-line" data-line="6">	<span class="tok-string">&quot;testing&quot;</span></span>
+<span class="code-line" data-line="7">	<span class="tok-string">&quot;treeSync/scan&quot;</span></span>
+<span class="code-line" data-line="8">)</span>
+<span class="code-line" data-line="9"></span>
+<span class="code-line" data-line="10"><span class="tok-keyword">func</span> TestDirRejectInvalidRoots(t *testing.T) {</span>
+<span class="code-line" data-line="11">	t.Run(<span class="tok-string">&quot;ordinary_file&quot;</span>, <span class="tok-keyword">func</span>(t *testing.T) {</span>
+<span class="code-line" data-line="12">		file := filepath.Join(t.TempDir(), <span class="tok-string">&quot;chapter.md&quot;</span>)</span>
+<span class="code-line" data-line="13">		<span class="tok-keyword">if</span> err := os.WriteFile(file, []byte(<span class="tok-string">&quot;content&quot;</span>), <span class="tok-number">0600</span>); err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="14">			t.Fatal(err)</span>
+<span class="code-line" data-line="15">		}</span>
+<span class="code-line" data-line="16">		<span class="tok-keyword">if</span> _, err := scan.Dir(file); err == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="17">			t.Fatal(<span class="tok-string">&quot;普通文件必须返回错误&quot;</span>)</span>
+<span class="code-line" data-line="18">		}</span>
+<span class="code-line" data-line="19">	})</span>
+<span class="code-line" data-line="20"></span>
+<span class="code-line" data-line="21">	t.Run(<span class="tok-string">&quot;empty_path&quot;</span>, <span class="tok-keyword">func</span>(t *testing.T) {</span>
+<span class="code-line" data-line="22">		<span class="tok-keyword">if</span> _, err := scan.Dir(<span class="tok-string">&quot;&quot;</span>); err == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="23">			t.Fatal(<span class="tok-string">&quot;空路径必须返回错误&quot;</span>)</span>
+<span class="code-line" data-line="24">		}</span>
+<span class="code-line" data-line="25">	})</span>
+<span class="code-line" data-line="26"></span>
+<span class="code-line" data-line="27">	t.Run(<span class="tok-string">&quot;missing_path&quot;</span>, <span class="tok-keyword">func</span>(t *testing.T) {</span>
+<span class="code-line" data-line="28">		missing := filepath.Join(t.TempDir(), <span class="tok-string">&quot;missing&quot;</span>)</span>
+<span class="code-line" data-line="29">		<span class="tok-keyword">if</span> _, err := scan.Dir(missing); err == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="30">			t.Fatal(<span class="tok-string">&quot;不存在的路径必须返回错误&quot;</span>)</span>
+<span class="code-line" data-line="31">		}</span>
+<span class="code-line" data-line="32">	})</span>
+<span class="code-line" data-line="33"></span>
+<span class="code-line" data-line="34">	t.Run(<span class="tok-string">&quot;symlink_root&quot;</span>, <span class="tok-keyword">func</span>(t *testing.T) {</span>
+<span class="code-line" data-line="35">		target := t.TempDir()</span>
+<span class="code-line" data-line="36">		link := filepath.Join(t.TempDir(), <span class="tok-string">&quot;book-link&quot;</span>)</span>
+<span class="code-line" data-line="37">		<span class="tok-keyword">if</span> err := os.Symlink(target, link); err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="38">			t.Skipf(<span class="tok-string">&quot;当前环境不支持创建软链接: %v&quot;</span>, err)</span>
+<span class="code-line" data-line="39">		}</span>
+<span class="code-line" data-line="40">		<span class="tok-keyword">for</span> _, path := <span class="tok-keyword">range</span> []<span class="tok-keyword">string</span>{</span>
+<span class="code-line" data-line="41">			link,</span>
+<span class="code-line" data-line="42">			link + <span class="tok-keyword">string</span>(os.PathSeparator),</span>
+<span class="code-line" data-line="43">			link + <span class="tok-keyword">string</span>(os.PathSeparator) + <span class="tok-string">&quot;.&quot;</span>,</span>
+<span class="code-line" data-line="44">		} {</span>
+<span class="code-line" data-line="45">			<span class="tok-keyword">if</span> _, err := scan.Dir(path); err == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="46">				t.Errorf(<span class="tok-string">&quot;根软链接必须返回错误: %q&quot;</span>, path)</span>
+<span class="code-line" data-line="47">			}</span>
+<span class="code-line" data-line="48">		}</span>
+<span class="code-line" data-line="49">	})</span>
+<span class="code-line" data-line="50">}</span>
+<span class="code-line" data-line="51"></span>
+<span class="code-line" data-line="52"><span class="tok-keyword">func</span> TestDirAcceptEmptyDirectory(t *testing.T) {</span>
+<span class="code-line" data-line="53">	files, err := scan.Dir(t.TempDir())</span>
+<span class="code-line" data-line="54">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> || len(files) != <span class="tok-number">0</span> {</span>
+<span class="code-line" data-line="55">		t.Fatalf(<span class="tok-string">&quot;合法空目录应成功返回空结果: files=%v err=%v&quot;</span>, files, err)</span>
+<span class="code-line" data-line="56">	}</span>
+<span class="code-line" data-line="57">}</span>
+<span class="code-line" data-line="58"></span>
+<span class="code-line" data-line="59"><span class="tok-keyword">func</span> TestDirKeepsRelativePathsAfterClean(t *testing.T) {</span>
+<span class="code-line" data-line="60">	directory := t.TempDir()</span>
+<span class="code-line" data-line="61">	<span class="tok-keyword">if</span> err := os.WriteFile(filepath.Join(directory, <span class="tok-string">&quot;chapter.md&quot;</span>), <span class="tok-keyword">nil</span>, <span class="tok-number">0600</span>); err != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="62">		t.Fatal(err)</span>
+<span class="code-line" data-line="63">	}</span>
+<span class="code-line" data-line="64">	files, err := scan.Dir(directory + <span class="tok-keyword">string</span>(os.PathSeparator) + <span class="tok-string">&quot;.&quot;</span>)</span>
+<span class="code-line" data-line="65">	<span class="tok-keyword">if</span> err != <span class="tok-keyword">nil</span> || len(files) != <span class="tok-number">1</span> || files[<span class="tok-number">0</span>] != <span class="tok-string">&quot;chapter.md&quot;</span> {</span>
+<span class="code-line" data-line="66">		t.Fatalf(<span class="tok-string">&quot;路径规范化后仍应返回相对路径: files=%v err=%v&quot;</span>, files, err)</span>
+<span class="code-line" data-line="67">	}</span>
+<span class="code-line" data-line="68">}</span></code></pre></div></div>
+    <p>接入修复和测试之后，可以运行：</p><pre class="command">go test ./scan -run 'TestDirRejectInvalidRoots|TestDirAcceptEmptyDirectory|TestDirKeepsRelativePathsAfterClean' -v&#10;go test ./...</pre>
+    <details class="detail-box"><summary>验证范围说明</summary><p>业务回归测试使用项目中的真实 GORM 调用链，SQL 连接由内存驱动替代，用于验证无效输入没有产生写入、增删顺序及失败回滚。进程测试保留提案中的 main()，用替身 run() 和 Book.Build() 制造成功与失败。测试没有访问真实 MySQL，也没有对生产目录执行同步。</p></details>
+  </section>
+
+  <section id="integration" aria-labelledby="integration-title"><div class="section-top"><span class="section-index">05</span><h2 id="integration-title">接入顺序与验收标准</h2></div>
+    <ol class="step-list"><li>更新 scan/scan.go，先拒绝空路径，再统一根路径表示。</li><li>更新 scan/walker.go，增加 fmt 导入，在根回调验证 d.IsDir()。</li><li>更新 main.go 的业务错误分支，使用 stderr 和退出码 1。</li><li>加入根路径回归测试，运行扫描测试与项目现有测试。</li><li>在自己的测试环境检查：无效根路径失败时，没有提交本次目录和文章增删，进程状态为非零。</li></ol>
+    <div class="fix-grid"><div class="card"><h3>P1 验收</h3><p>非目录根路径必须返回错误，并在比较和落盘前停止；不能因为这次无效输入删除旧树后代。</p></div><div class="card"><h3>P2 验收</h3><p>初始化或同步失败都写入 stderr，返回退出码 1；同步成功继续输出报告，返回退出码 0。</p></div></div>
+    <ul class="source-links" aria-label="官方参考"><li><a href="https://pkg.go.dev/path/filepath#WalkDir" target="_blank" rel="noopener noreferrer">Go · WalkDir 根回调与软链接 ↗</a></li><li><a href="https://pkg.go.dev/path/filepath#Clean" target="_blank" rel="noopener noreferrer">Go · Clean 的空路径行为 ↗</a></li><li><a href="https://pkg.go.dev/os#Exit" target="_blank" rel="noopener noreferrer">Go · Exit 与 defer ↗</a></li><li><a href="catalogue-tree-compare.html">原目录树同步方案 →</a></li></ul>
+  </section>
+  <footer class="footer"><span>treeSync · 两项缺陷修复提案</span><span><code>catalogue-sync-fixes.html</code> · 2026-11-02</span></footer>
+</main>
+</div>
+<div class="visually-hidden" role="status" aria-live="polite" id="copy-status"></div>
+<script>
+(() => {
+  async function copy(value) {
+    if (navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(value); return; } catch (_) {}
+    }
+    const field=document.createElement('textarea');
+    field.value=value; field.style.position='fixed'; field.style.opacity='0';
+    document.body.append(field); field.select();
+    const done=document.execCommand('copy'); field.remove();
+    if(!done) throw new Error('copy unavailable');
+  }
+  document.querySelectorAll('[data-copy]').forEach(button=>button.addEventListener('click',async()=>{
+    try {
+      await copy(document.getElementById(button.dataset.copy).textContent);
+      button.textContent='已复制';
+      document.getElementById('copy-status').textContent='代码已复制到剪贴板';
+    } catch (_) {
+      button.textContent='请手动选择';
+      document.getElementById('copy-status').textContent='复制不可用，请手动选择代码';
+    }
+    setTimeout(()=>{button.textContent='复制代码'},1800);
+  }));
+  document.getElementById('print-document').addEventListener('click',()=>window.print());
+  const links=[...document.querySelectorAll('.sidebar nav a')];
+  const sections=[...document.querySelectorAll('main section[id]')];
+  function reading() {
+    const height=document.documentElement.scrollHeight-window.innerHeight;
+    document.getElementById('reading-progress').style.width=(height>0?Math.min(100,Math.max(0,window.scrollY/height*100)):0)+'%';
+    let active=sections[0]?.id;
+    sections.forEach(section=>{if(section.getBoundingClientRect().top<=160)active=section.id});
+    links.forEach(link=>{
+      const selected=link.getAttribute('href')==='#'+active;
+      link.classList.toggle('active',selected);
+      if(selected)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');
+    });
+  }
+  window.addEventListener('scroll',reading,{passive:true});
+  window.addEventListener('resize',reading);
+  reading();
+})();
+</script>
+</body>
+</html>
