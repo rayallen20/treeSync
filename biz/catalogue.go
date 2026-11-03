@@ -207,9 +207,9 @@ func (c *Catalogue) buildFromRows(rows []*model.Catalogue) error {
 		return errors.New("目录ORM集合为空")
 	}
 
-	catalogues := make(map[int64]*Catalogue, len(rows))
-
 	// 遍历ORM集合 将ORM转换为业务对象(也将叶子节点的文章ORM转换为业务对象)
+	catalogues := make(map[int64]*Catalogue, len(rows))
+	
 	for _, row := range rows {
 		if row == nil {
 			return errors.New("目录ORM集合中存在nil")
