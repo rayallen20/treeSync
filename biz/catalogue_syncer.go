@@ -66,8 +66,11 @@ func (s *CatalogueSyncer) compareNodes(origin *Catalogue, current *Catalogue, pa
 		return
 	}
 
-	// 节点名称相同,则复用旧节点的ID
+	// 节点名称相同,则复用旧节点的ID和Sort
 	current.ID = origin.ID
+	if origin.Sort != nil {
+		current.Sort = origin.Sort
+	}
 
 	// 处理节点对应的文章信息
 	// 两个节点均为叶子节点,则复用原节点的文章ID

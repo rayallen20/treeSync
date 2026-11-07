@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <meta name="description" content="treeSync 目录树增量同步参考实现：CatalogueSyncer 持有原树与新树，负责 ID 对齐、增删比较，并协调 model 层事务执行。">
+  <meta name="description" content="treeSync 目录树增量同步参考实现：CatalogueSyncer 持有原树与新树，负责 ID 对齐、保留已有排序、增删比较，并协调 model 层事务执行。">
   <title>目录树增量同步 · CatalogueSyncer 设计与实现 | treeSync</title>
   <style>
 :root { --ink:#19352e; --text:#334b46; --muted:#61746d; --green:#17694f; --green-soft:#e6f2eb; --line:#dce4df; --paper:#fffefa; --bg:#f4f5f0; --red:#a33d43; --red-soft:#fbecef; --blue:#355a9a; --blue-soft:#eaf0fb; --code:#17251f; --radius:18px; }
@@ -41,8 +41,8 @@
     <header class="hero">
       <div class="eyebrow">Implementation guide / Go + GORM</div>
       <h1>两棵目录树，<br>如何完成增量同步</h1>
-      <p class="hero-description">由 <code>CatalogueSyncer</code> 持有原树和新树，按父节点与名称匹配、保留既有 ID，并协调 model 层在同一个事务中同步目录与文章。</p>
-      <div class="hero-meta"><span class="pill">CatalogueSyncer</span><span class="pill">递归比较</span><span class="pill">ID 复用</span><span class="pill">逐条写入 · 单一事务</span><span class="pill">离线阅读</span></div>
+      <p class="hero-description">由 <code>CatalogueSyncer</code> 持有原树和新树，按父节点与名称匹配、保留既有 ID 和非空 Sort，并协调 model 层在同一个事务中同步目录与文章。</p>
+      <div class="hero-meta"><span class="pill">CatalogueSyncer</span><span class="pill">递归比较</span><span class="pill">ID 复用</span><span class="pill">保留已有 Sort</span><span class="pill">逐条写入 · 单一事务</span><span class="pill">离线阅读</span></div>
       <button type="button" class="print-button" id="print-document">打印 / 另存为 PDF ↗</button>
     </header>
 
@@ -53,7 +53,7 @@
       <div class="table-scroll"><table><thead><tr><th scope="col">原树 originTree</th><th scope="col">新树 currentTree</th><th scope="col">操作</th></tr></thead><tbody>
         <tr><td>存在</td><td>不存在</td><td><span class="status delete">删除</span> 删除该节点、全部后代，以及它们关联的文章。</td></tr>
         <tr><td>不存在</td><td>存在</td><td><span class="status add">新增</span> 收集整棵新增子树，保留新生成的 ID。</td></tr>
-        <tr><td>存在</td><td>存在</td><td><span class="status keep">复用</span> 将旧目录 ID 赋给新节点，再继续比较子节点。</td></tr>
+        <tr><td>存在</td><td>存在</td><td><span class="status keep">复用</span> 将旧目录 ID 赋给新节点；原节点的 <code>Sort</code> 非空时也复制其值，再继续比较子节点。</td></tr>
       </tbody></table></div>
       <div class="rule-grid"><div class="card"><h3>目录和文章分别保留身份</h3><p>同一目录节点继续使用旧 <code>Catalogue.ID</code>。两边均有文章时，新树的 <code>Article.ID</code> 也要复用旧值，避免未变化的文章被判成“先删再增”。</p></div><div class="card"><h3>移动或重命名属于增删</h3><p>同名节点换了父目录，或同一父目录下改了名称，都不满足匹配条件。按当前规则，删除旧位置的子树，再新增新位置的子树。</p></div></div>
       <div class="callout"><p><strong>父节点身份按树上的匹配关系确定。</strong> 两棵树的初始 ID 不同，不能先用原始的父 ID 判断它们是否相同。递归进入一对已匹配的父节点后，才通过各自的 <code>index[Name]</code> 比较子节点。</p></div>
@@ -78,13 +78,13 @@
       <div class="section-top"><span class="section-index">03</span><h2 id="architecture-title">CatalogueSyncer 管理一次同步任务</h2></div>
       <p class="section-intro"><code>Catalogue</code> 表示节点；<code>CatalogueSyncer</code> 持有原树和新树，负责比较及协调持久化；<code>model</code> 根据清单执行数据库事务。每次同步创建一个独立的同步任务对象。</p>
       <div class="syncer-diagram" role="img" aria-label="CatalogueSyncer 持有 originTree 和 currentTree 两个成员。Compare 生成变更清单，Sync 调用 model 执行事务；Catalogue 提供节点和子树操作，Book 在同步成功后采用新树。">
-        <div class="syncer-object"><div class="syncer-object-title"><span class="mini-label">BIZ / 一次同步任务</span><strong>CatalogueSyncer</strong></div><div class="syncer-members"><div><code>originTree *Catalogue</code><span>数据库中的原树 · 首次同步可为 nil</span></div><div><code>currentTree *Catalogue</code><span>扫描得到的新树 · 在这里复用原 ID</span></div></div><div class="syncer-methods"><span><code>Compare()</code> 生成变更</span><span><code>compareNodes()</code> 递归匹配</span><span><code>Sync()</code> 协调落盘与报告</span></div></div>
+        <div class="syncer-object"><div class="syncer-object-title"><span class="mini-label">BIZ / 一次同步任务</span><strong>CatalogueSyncer</strong></div><div class="syncer-members"><div><code>originTree *Catalogue</code><span>数据库中的原树 · 首次同步可为 nil</span></div><div><code>currentTree *Catalogue</code><span>扫描得到的新树 · 复用原 ID 与非空 Sort</span></div></div><div class="syncer-methods"><span><code>Compare()</code> 生成变更</span><span><code>compareNodes()</code> 递归匹配</span><span><code>Sync()</code> 协调落盘与报告</span></div></div>
         <div class="syncer-support"><span><strong>Catalogue</strong> 提供节点、索引、构树、扁平化、打印</span><span><strong>model</strong> 提供 ORM 与事务执行</span></div>
       </div>
-      <div class="table-scroll"><table><thead><tr><th scope="col">对象 / 方法</th><th scope="col">职责</th></tr></thead><tbody><tr><td><code>Catalogue</code></td><td>保存单个节点的数据，维护 <code>Children</code>、<code>index</code>，提供构树和子树遍历操作。</td></tr><tr><td><code>CatalogueSyncer.Compare()</code></td><td>校验输入、对齐新树中的 ID，产出四组增删数据；原树保持不动。</td></tr><tr><td><code>CatalogueSyncer.Sync()</code></td><td>调用比较方法，再调用 model 层保存；事务成功后生成变更报告。</td></tr><tr><td><code>model.ApplyCatalogueChanges()</code></td><td>管理 <code>Begin()</code>、逐条执行 SQL、<code>Commit()</code> 和 <code>Rollback()</code>。</td></tr></tbody></table></div>
-      <div class="flow-diagram" role="img" aria-label="业务入口构建两棵树，CatalogueSyncer.Compare 对齐 ID 并生成清单，Sync 调用 model 事务执行，成功后 Book 使用新树并返回报告。"><div class="flow-step"><small>INPUT / 01</small><strong>业务入口准备两棵树</strong><p>从 ORM 恢复原树，从文件扫描构建新树。</p></div><div class="flow-step"><small>SYNCER / 02</small><strong>Compare() 生成清单</strong><p>compareNodes() 按父节点和名称匹配，复用 ID。</p></div><div class="flow-step"><small>MODEL / 03</small><strong>Sync() 调用事务执行</strong><p>model 在同一个 tx 中逐条执行增删。</p></div><div class="flow-step"><small>BOOK / 04</small><strong>成功后使用新树</strong><p>Sync() 返回报告，Book.Catalogue 指向新树。</p></div></div>
+      <div class="table-scroll"><table><thead><tr><th scope="col">对象 / 方法</th><th scope="col">职责</th></tr></thead><tbody><tr><td><code>Catalogue</code></td><td>保存单个节点的数据，维护 <code>Children</code>、<code>index</code>，提供构树和子树遍历操作。</td></tr><tr><td><code>CatalogueSyncer.Compare()</code></td><td>校验输入、对齐新树中的 ID，并复制原节点非空的 <code>Sort</code>，产出四组增删数据；原树保持不动。</td></tr><tr><td><code>CatalogueSyncer.Sync()</code></td><td>调用比较方法，再调用 model 层保存；事务成功后生成变更报告。</td></tr><tr><td><code>model.ApplyCatalogueChanges()</code></td><td>管理 <code>Begin()</code>、逐条执行 SQL、<code>Commit()</code> 和 <code>Rollback()</code>。</td></tr></tbody></table></div>
+      <div class="flow-diagram" role="img" aria-label="业务入口构建两棵树，CatalogueSyncer.Compare 对齐 ID、复制非空 Sort 并生成清单，Sync 调用 model 事务执行，成功后 Book 使用新树并返回报告。"><div class="flow-step"><small>INPUT / 01</small><strong>业务入口准备两棵树</strong><p>从 ORM 恢复原树，从文件扫描构建新树。</p></div><div class="flow-step"><small>SYNCER / 02</small><strong>Compare() 生成清单</strong><p>compareNodes() 按父节点和名称匹配，复用 ID、复制非空 Sort。</p></div><div class="flow-step"><small>MODEL / 03</small><strong>Sync() 调用事务执行</strong><p>model 在同一个 tx 中逐条执行增删。</p></div><div class="flow-step"><small>BOOK / 04</small><strong>成功后使用新树</strong><p>Sync() 返回报告，Book.Catalogue 指向新树。</p></div></div>
       <div class="split-explanation"><div class="card"><div class="mini-label">四组数据</div><p><code>AddCatalogues</code>、<code>AddArticles</code> 保存待插入的 ORM；<code>DeleteCatalogueIDs</code>、<code>DeleteArticleIDs</code> 保存旧记录的主键。</p></div><div class="card"><div class="mini-label">节点缺失，通过参数表达</div><p>递归始终调用同一个 <code>s.compareNodes(origin, current, ...)</code>。同步对象 <code>s</code> 已存在；<code>origin</code> 或 <code>current</code> 可以为 <code>nil</code>，分别表示新增或删除。</p></div></div>
-      <details class="detail-box"><summary>这份实现的输入与生命周期约定</summary><ul><li>新树非空；原树在首次同步时可以为 <code>nil</code>，此时整棵新树都会进入新增清单。</li><li>原树存在时，两棵树属于同一本书，且内存对象彼此独立。</li><li>同一父节点下名称唯一，<code>index</code> 与 <code>Children</code> 保持一致；原树已经预加载 <code>Article</code>。</li><li><code>flattenInto()</code> 按先序遍历输出目录；新节点和新文章的雪花 ID 唯一。</li><li>一个同步对象对应一次任务。下次同步重新读取原树并创建新对象，避免重复应用同一份增删结果。</li></ul></details>
+      <details class="detail-box"><summary>这份实现的输入与生命周期约定</summary><ul><li>新树非空；原树在首次同步时可以为 <code>nil</code>，此时整棵新树都会进入新增清单。</li><li>原树存在时，两棵树属于同一本书，构树时使用不同的节点对象。比对后，匹配节点的 <code>Sort</code> 可以共享指针；后续不通过该指针修改排序值。</li><li>同一父节点下名称唯一，<code>index</code> 与 <code>Children</code> 保持一致；原树已经预加载 <code>Article</code>。</li><li><code>flattenInto()</code> 按先序遍历输出目录；新节点和新文章的雪花 ID 唯一。</li><li>一个同步对象对应一次任务。下次同步重新读取原树并创建新对象，避免重复应用同一份增删结果。</li></ul></details>
     </section>
 
     <section id="implementation" aria-labelledby="implementation-title">
@@ -111,7 +111,7 @@
 <span class="code-line" data-line="13">		currentTree: currentTree,</span>
 <span class="code-line" data-line="14">	}</span>
 <span class="code-line" data-line="15">}</span></code></pre></div></div>
-      <div class="code-section"><h3>C. Compare()：对齐 ID，生成变更</h3><p>这个方法处理内存数据：调整新树中的匹配 ID，并产出变更清单。数据库读写由业务入口和 model 层负责。原树为 <code>nil</code> 时，可直接生成首次同步的新增清单。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / (*CatalogueSyncer).Compare()</span><div class="code-actions"><span class="line-count">16 行 · Go</span><button type="button" class="copy-button" data-copy="code-compare">复制代码</button></div></div><pre tabindex="0" aria-label="biz / (*CatalogueSyncer).Compare()"><code id="code-compare"><span class="code-line" data-line="1"><span class="tok-comment">// Compare 对齐新树中的 ID，并生成增删清单；原树保持不动。</span></span>
+      <div class="code-section"><h3>C. Compare()：对齐 ID、保留排序，生成变更</h3><p>这个方法处理内存数据：调整新树中的匹配 ID，复制原节点非空的 <code>Sort</code>，并产出变更清单。数据库读写由业务入口和 model 层负责。原树为 <code>nil</code> 时，可直接生成首次同步的新增清单。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / (*CatalogueSyncer).Compare()</span><div class="code-actions"><span class="line-count">16 行 · Go</span><button type="button" class="copy-button" data-copy="code-compare">复制代码</button></div></div><pre tabindex="0" aria-label="biz / (*CatalogueSyncer).Compare()"><code id="code-compare"><span class="code-line" data-line="1"><span class="tok-comment">// Compare 对齐新树中的 ID、复制非空 Sort，并生成增删清单。</span></span>
 <span class="code-line" data-line="2"><span class="tok-keyword">func</span> (s *CatalogueSyncer) Compare() (*model.CatalogueChanges, <span class="tok-keyword">error</span>) {</span>
 <span class="code-line" data-line="3">	<span class="tok-keyword">if</span> s == <span class="tok-keyword">nil</span> {</span>
 <span class="code-line" data-line="4">		<span class="tok-keyword">return</span> <span class="tok-keyword">nil</span>, errors.New(<span class="tok-string">&quot;同步任务不能为空&quot;</span>)</span>
@@ -127,7 +127,7 @@
 <span class="code-line" data-line="14">	s.compareNodes(s.originTree, s.currentTree, <span class="tok-number">0</span>, changes)</span>
 <span class="code-line" data-line="15">	<span class="tok-keyword">return</span> changes, <span class="tok-keyword">nil</span></span>
 <span class="code-line" data-line="16">}</span></code></pre></div></div>
-      <div class="code-section"><h3>D. compareNodes()：同步对象的递归辅助方法</h3><p>接收者 <code>s</code> 表示整个同步任务。<code>origin</code> 和 <code>current</code> 是两侧待比较的节点，递归时显式传入，缺失的一侧使用 <code>nil</code>。文章比较使用三个互斥的平级 <code>if</code>：两边都有时复用 ID，仅原树有时删除，仅新树有时新增。两边都没有文章时，三个条件均不成立。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / (*CatalogueSyncer).compareNodes()</span><div class="code-actions"><span class="line-count">82 行 · Go</span><button type="button" class="copy-button" data-copy="code-nodes">复制代码</button></div></div><pre tabindex="0" aria-label="biz / (*CatalogueSyncer).compareNodes()"><code id="code-nodes"><span class="code-line" data-line="1"><span class="tok-comment">// compareNodes 比较一对节点；origin 和 current 可以为 nil。</span></span>
+      <div class="code-section"><h3>D. compareNodes()：同步对象的递归辅助方法</h3><p>接收者 <code>s</code> 表示整个同步任务。<code>origin</code> 和 <code>current</code> 是两侧待比较的节点，递归时显式传入，缺失的一侧使用 <code>nil</code>。文章比较使用三个互斥的平级 <code>if</code>：两边都有时复用 ID，仅原树有时删除，仅新树有时新增。两边都没有文章时，三个条件均不成立。</p><div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / (*CatalogueSyncer).compareNodes()</span><div class="code-actions"><span class="line-count">87 行 · Go</span><button type="button" class="copy-button" data-copy="code-nodes">复制代码</button></div></div><pre tabindex="0" aria-label="biz / (*CatalogueSyncer).compareNodes()"><code id="code-nodes"><span class="code-line" data-line="1"><span class="tok-comment">// compareNodes 比较一对节点；origin 和 current 可以为 nil。</span></span>
 <span class="code-line" data-line="2"><span class="tok-keyword">func</span> (s *CatalogueSyncer) compareNodes(</span>
 <span class="code-line" data-line="3">	origin *Catalogue,</span>
 <span class="code-line" data-line="4">	current *Catalogue,</span>
@@ -172,45 +172,53 @@
 <span class="code-line" data-line="43">		<span class="tok-keyword">return</span></span>
 <span class="code-line" data-line="44">	}</span>
 <span class="code-line" data-line="45"></span>
-<span class="code-line" data-line="46">	<span class="tok-comment">// 同一节点：只在新树上复用原有目录 ID。</span></span>
+<span class="code-line" data-line="46">	<span class="tok-comment">// 同一节点：复用原有目录 ID，并保留已有排序值。</span></span>
 <span class="code-line" data-line="47">	current.ID = origin.ID</span>
 <span class="code-line" data-line="48"></span>
-<span class="code-line" data-line="49">	<span class="tok-comment">// 两边都有文章：复用原文章 ID。</span></span>
-<span class="code-line" data-line="50">	<span class="tok-keyword">if</span> origin.Article != <span class="tok-keyword">nil</span> &amp;&amp; current.Article != <span class="tok-keyword">nil</span> {</span>
-<span class="code-line" data-line="51">		current.Article.ID = origin.Article.ID</span>
+<span class="code-line" data-line="49">	<span class="tok-comment">// 原 Sort 非空时直接复用指针；后续只读取排序值。</span></span>
+<span class="code-line" data-line="50">	<span class="tok-keyword">if</span> origin.Sort != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="51">		current.Sort = origin.Sort</span>
 <span class="code-line" data-line="52">	}</span>
 <span class="code-line" data-line="53"></span>
-<span class="code-line" data-line="54">	<span class="tok-comment">// 只有原树有文章：删除。</span></span>
-<span class="code-line" data-line="55">	<span class="tok-keyword">if</span> origin.Article != <span class="tok-keyword">nil</span> &amp;&amp; current.Article == <span class="tok-keyword">nil</span> {</span>
-<span class="code-line" data-line="56">		changes.DeleteArticleIDs = append(</span>
-<span class="code-line" data-line="57">			changes.DeleteArticleIDs, origin.Article.ID,</span>
-<span class="code-line" data-line="58">		)</span>
-<span class="code-line" data-line="59">	}</span>
-<span class="code-line" data-line="60"></span>
-<span class="code-line" data-line="61">	<span class="tok-comment">// 只有新树有文章：新增。</span></span>
-<span class="code-line" data-line="62">	<span class="tok-keyword">if</span> origin.Article == <span class="tok-keyword">nil</span> &amp;&amp; current.Article != <span class="tok-keyword">nil</span> {</span>
-<span class="code-line" data-line="63">		changes.AddArticles = append(changes.AddArticles, &amp;model.Article{</span>
-<span class="code-line" data-line="64">			ID:          current.Article.ID,</span>
-<span class="code-line" data-line="65">			CatalogueID: current.ID,</span>
-<span class="code-line" data-line="66">			Path:        current.Article.Path,</span>
-<span class="code-line" data-line="67">		})</span>
-<span class="code-line" data-line="68">	}</span>
-<span class="code-line" data-line="69"></span>
-<span class="code-line" data-line="70">	<span class="tok-comment">// 处理原有子节点：匹配或删除。</span></span>
-<span class="code-line" data-line="71">	<span class="tok-keyword">for</span> _, originChild := <span class="tok-keyword">range</span> origin.Children {</span>
-<span class="code-line" data-line="72">		currentChild := current.index[originChild.Name]</span>
-<span class="code-line" data-line="73">		s.compareNodes(originChild, currentChild, current.ID, changes)</span>
-<span class="code-line" data-line="74">	}</span>
-<span class="code-line" data-line="75"></span>
-<span class="code-line" data-line="76">	<span class="tok-comment">// 处理新增子节点；已匹配的节点在上一循环中处理过。</span></span>
-<span class="code-line" data-line="77">	<span class="tok-keyword">for</span> _, currentChild := <span class="tok-keyword">range</span> current.Children {</span>
-<span class="code-line" data-line="78">		<span class="tok-keyword">if</span> _, exists := origin.index[currentChild.Name]; !exists {</span>
-<span class="code-line" data-line="79">			s.compareNodes(<span class="tok-keyword">nil</span>, currentChild, current.ID, changes)</span>
-<span class="code-line" data-line="80">		}</span>
-<span class="code-line" data-line="81">	}</span>
-<span class="code-line" data-line="82">}</span></code></pre></div></div>
+<span class="code-line" data-line="54">	<span class="tok-comment">// 两边都有文章：复用原文章 ID。</span></span>
+<span class="code-line" data-line="55">	<span class="tok-keyword">if</span> origin.Article != <span class="tok-keyword">nil</span> &amp;&amp; current.Article != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="56">		current.Article.ID = origin.Article.ID</span>
+<span class="code-line" data-line="57">	}</span>
+<span class="code-line" data-line="58"></span>
+<span class="code-line" data-line="59">	<span class="tok-comment">// 只有原树有文章：删除。</span></span>
+<span class="code-line" data-line="60">	<span class="tok-keyword">if</span> origin.Article != <span class="tok-keyword">nil</span> &amp;&amp; current.Article == <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="61">		changes.DeleteArticleIDs = append(</span>
+<span class="code-line" data-line="62">			changes.DeleteArticleIDs, origin.Article.ID,</span>
+<span class="code-line" data-line="63">		)</span>
+<span class="code-line" data-line="64">	}</span>
+<span class="code-line" data-line="65"></span>
+<span class="code-line" data-line="66">	<span class="tok-comment">// 只有新树有文章：新增。</span></span>
+<span class="code-line" data-line="67">	<span class="tok-keyword">if</span> origin.Article == <span class="tok-keyword">nil</span> &amp;&amp; current.Article != <span class="tok-keyword">nil</span> {</span>
+<span class="code-line" data-line="68">		changes.AddArticles = append(changes.AddArticles, &amp;model.Article{</span>
+<span class="code-line" data-line="69">			ID:          current.Article.ID,</span>
+<span class="code-line" data-line="70">			CatalogueID: current.ID,</span>
+<span class="code-line" data-line="71">			Path:        current.Article.Path,</span>
+<span class="code-line" data-line="72">		})</span>
+<span class="code-line" data-line="73">	}</span>
+<span class="code-line" data-line="74"></span>
+<span class="code-line" data-line="75">	<span class="tok-comment">// 处理原有子节点：匹配或删除。</span></span>
+<span class="code-line" data-line="76">	<span class="tok-keyword">for</span> _, originChild := <span class="tok-keyword">range</span> origin.Children {</span>
+<span class="code-line" data-line="77">		currentChild := current.index[originChild.Name]</span>
+<span class="code-line" data-line="78">		s.compareNodes(originChild, currentChild, current.ID, changes)</span>
+<span class="code-line" data-line="79">	}</span>
+<span class="code-line" data-line="80"></span>
+<span class="code-line" data-line="81">	<span class="tok-comment">// 处理新增子节点；已匹配的节点在上一循环中处理过。</span></span>
+<span class="code-line" data-line="82">	<span class="tok-keyword">for</span> _, currentChild := <span class="tok-keyword">range</span> current.Children {</span>
+<span class="code-line" data-line="83">		<span class="tok-keyword">if</span> _, exists := origin.index[currentChild.Name]; !exists {</span>
+<span class="code-line" data-line="84">			s.compareNodes(<span class="tok-keyword">nil</span>, currentChild, current.ID, changes)</span>
+<span class="code-line" data-line="85">		}</span>
+<span class="code-line" data-line="86">	}</span>
+<span class="code-line" data-line="87">}</span></code></pre></div></div>
       <div class="callout"><p><strong>同步对象始终存在，缺失节点通过参数表示。</strong> 先处理 <code>origin == nil</code> 的新增分支，再处理 <code>current == nil</code> 的删除分支，之后才访问节点字段。两侧节点都为 <code>nil</code> 时直接返回。</p></div>
-      <div class="table-scroll"><table><thead><tr><th scope="col">递归调用</th><th scope="col">节点状态</th><th scope="col">处理方式</th></tr></thead><tbody><tr><td><code>s.compareNodes(nil, current, parentID, changes)</code></td><td>只有新节点</td><td>收集整棵新增子树。</td></tr><tr><td><code>s.compareNodes(origin, nil, parentID, changes)</code></td><td>只有旧节点</td><td>收集整棵旧子树及文章的删除 ID。</td></tr><tr><td><code>s.compareNodes(origin, current, parentID, changes)</code></td><td>两边都有节点</td><td>按名称匹配、复用 ID，再比较子节点。</td></tr></tbody></table></div>
+      <div class="callout"><p><strong>相同节点同时保留已有排序。</strong> 在 <code>current.ID = origin.ID</code> 之后检查 <code>origin.Sort != nil</code>，再执行 <code>current.Sort = origin.Sort</code>。新旧节点共享指向同一个整数的指针；根据当前约定，后续只读取排序值，因此可以直接复用。删除数据库中的旧记录或移除原树中的节点引用，不会使新树持有的指针失效。该规则也适用于匹配的根节点和后代节点。</p><p>原值为 <code>nil</code> 时保留 <code>current.Sort</code> 的现值；原值指向 <code>0</code> 时也必须复制。新增、移动或重命名产生的新节点不从旧位置继承排序。此处只保留字段值；<code>Children</code> 的遍历顺序保持原样。</p></div>
+      <div class="table-scroll"><table><thead><tr><th scope="col">匹配节点的原 Sort</th><th scope="col">新 Sort（比较前）</th><th scope="col">新 Sort（比较后）</th></tr></thead><tbody><tr><td><code>nil</code></td><td><code>nil</code></td><td><code>nil</code></td></tr><tr><td><code>nil</code></td><td>指向 <code>7</code></td><td>仍指向 <code>7</code></td></tr><tr><td>指向 <code>0</code></td><td><code>nil</code></td><td>与原节点共享指向 <code>0</code> 的指针</td></tr><tr><td>指向 <code>3</code></td><td>指向 <code>9</code></td><td>与原节点共享指向 <code>3</code> 的指针</td></tr></tbody></table></div>
+      <p style="margin-top:16px;font-size:14px;color:var(--muted)">匹配节点沿用数据库中的同一条记录，原有 <code>sort</code> 已保存在该记录里。这一步让内存中的新树保留同样的值，现有增删清单与事务函数无需增加排序更新 SQL。</p>
+      <div class="table-scroll"><table><thead><tr><th scope="col">递归调用</th><th scope="col">节点状态</th><th scope="col">处理方式</th></tr></thead><tbody><tr><td><code>s.compareNodes(nil, current, parentID, changes)</code></td><td>只有新节点</td><td>收集整棵新增子树。</td></tr><tr><td><code>s.compareNodes(origin, nil, parentID, changes)</code></td><td>只有旧节点</td><td>收集整棵旧子树及文章的删除 ID。</td></tr><tr><td><code>s.compareNodes(origin, current, parentID, changes)</code></td><td>两边都有节点</td><td>按名称匹配、复用 ID、复制非空 Sort，再比较子节点。</td></tr></tbody></table></div>
       <div class="callout"><p><strong>新增子树的父 ID 必须正确。</strong> 父节点匹配后，<code>current.ID</code> 已经被替换成旧 ID。递归时将它传给 <code>flattenInto()</code>，新子树才会连接到数据库中已有的父节点。</p></div>
       <div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>新增子树 / parentID 的传递</span><div class="code-actions"><span class="line-count">5 行 · Go</span><button type="button" class="copy-button" data-copy="code-parent">复制代码</button></div></div><pre tabindex="0" aria-label="新增子树 / parentID 的传递"><code id="code-parent"><span class="code-line" data-line="1"><span class="tok-comment">// 正确：新增子树继承已匹配父节点的原有 ID。</span></span>
 <span class="code-line" data-line="2">current.flattenInto(parentID, &amp;changes.AddCatalogues, &amp;changes.AddArticles)</span>
@@ -334,11 +342,11 @@
       <div class="code-window"><div class="code-toolbar"><span><i class="code-dot"></i>biz / Book.Build() 调用位置</span><div class="code-actions"><span class="line-count">3 行 · Go</span><button type="button" class="copy-button" data-copy="code-book-entry">复制代码</button></div></div><pre tabindex="0" aria-label="biz / Book.Build() 调用位置"><code id="code-book-entry"><span class="code-line" data-line="1"><span class="tok-comment">// Book.Build() 中：查询并填充书籍信息后，调用同步入口。</span></span>
 <span class="code-line" data-line="2">b.fillByORM(orm)</span>
 <span class="code-line" data-line="3"><span class="tok-keyword">return</span> b.syncCatalogue(path)</span></code></pre></div>
-      <div class="boundary-grid"><div class="card"><h3>首次同步也走同一个入口</h3><p>数据库中没有目录时，<code>originTree</code> 保持 <code>nil</code>。<code>Compare()</code> 会收集整棵新树，包括根节点和文章，随后由相同的事务函数保存。</p></div><div class="card"><h3>根节点同样按名称匹配</h3><p>代码把根节点的父节点视为空。根名称不同，会整树删除旧节点、整树新增新节点。若希望书名改变时保留根 ID，需要单独定义根节点按 <code>BookID</code> 匹配的规则。</p></div><div class="card"><h3>已有字段的更新是下一类操作</h3><p>当前范围是新增、删除和 ID 复用。同名同父节点的 <code>Type</code> 或文章 <code>Path</code> 改变时，需要在清单中增加字段更新项，并在同一事务中执行。</p></div><div class="card"><h3>原树快照与最终树各有用途</h3><p><code>Compare()</code> 只修改新树中的匹配 ID；原树保留旧身份和删除依据。<code>Sync()</code> 成功返回后，业务入口通过 <code>b.Catalogue = currentTree</code> 采用新树。</p></div><div class="card"><h3>目录与文章各自比较</h3><p>匹配目录下，两边都有文章就复用文章 ID；仅旧树有文章就删除；仅新树有文章就新增。文章的 <code>CatalogueID</code> 使用已对齐的目录 ID。</p></div><div class="card"><h3>每次任务创建一个同步对象</h3><p>一次成功同步后，下一次任务重新读取数据库并重新构建新树。同步对象持有的是本次任务的两份输入，避免重复调用 <code>Sync()</code> 应用相同增删。</p></div></div>
+      <div class="boundary-grid"><div class="card"><h3>首次同步也走同一个入口</h3><p>数据库中没有目录时，<code>originTree</code> 保持 <code>nil</code>。<code>Compare()</code> 会收集整棵新树，包括根节点和文章，随后由相同的事务函数保存。</p></div><div class="card"><h3>根节点同样按名称匹配</h3><p>代码把根节点的父节点视为空。根名称不同，会整树删除旧节点、整树新增新节点。若希望书名改变时保留根 ID，需要单独定义根节点按 <code>BookID</code> 匹配的规则。</p></div><div class="card"><h3>已有字段的更新是下一类操作</h3><p>当前范围是新增、删除、ID 复用，以及向新树复制已有非空 <code>Sort</code>。同名同父节点的 <code>Type</code> 或文章 <code>Path</code> 改变时，需要在清单中增加字段更新项，并在同一事务中执行。</p></div><div class="card"><h3>原树快照与最终树各有用途</h3><p><code>Compare()</code> 修改新树中的匹配 ID，并复制旧节点非空的 <code>Sort</code> 值；原树保留旧身份、排序和删除依据。<code>Sync()</code> 成功返回后，业务入口通过 <code>b.Catalogue = currentTree</code> 采用新树。</p></div><div class="card"><h3>目录与文章各自比较</h3><p>匹配目录下，两边都有文章就复用文章 ID；仅旧树有文章就删除；仅新树有文章就新增。文章的 <code>CatalogueID</code> 使用已对齐的目录 ID。</p></div><div class="card"><h3>每次任务创建一个同步对象</h3><p>一次成功同步后，下一次任务重新读取数据库并重新构建新树。同步对象持有的是本次任务的两份输入，避免重复调用 <code>Sync()</code> 应用相同增删。</p></div></div>
       <div class="callout neutral"><p><strong>接入分工：</strong> 在 <code>biz/catalogue_syncer.go</code> 中新增 <code>CatalogueSyncer</code>、<code>Compare()</code>、<code>compareNodes()</code> 和 <code>Sync()</code>；<code>Catalogue</code> 保留构树、索引、扁平化和打印；model 层保存 ORM 与事务函数；<code>Book.Build()</code> 调用同步入口。</p></div>
       <ul class="source-links" aria-label="延伸阅读"><li><a href="https://gorm.io/zh_CN/docs/delete.html#根据主键删除" target="_blank" rel="noopener noreferrer">GORM · 按主键删除 ↗</a></li><li><a href="https://gorm.io/zh_CN/docs/transactions.html#手动事务" target="_blank" rel="noopener noreferrer">GORM · 手动事务 ↗</a></li><li><a href="https://gorm.io/zh_CN/docs/associations.html#跳过自动创建、更新" target="_blank" rel="noopener noreferrer">GORM · 控制关联保存 ↗</a></li></ul>
     </section>
-    <footer class="footer"><span>treeSync · 目录树增量同步实现说明</span><span><code>catalogue-tree-compare.html</code> · 2026-11-02</span></footer>
+    <footer class="footer"><span>treeSync · 目录树增量同步实现说明</span><span><code>catalogue-tree-compare.html</code> · 2026-11-07</span></footer>
   </main>
 </div>
 <div class="visually-hidden" role="status" aria-live="polite" id="copy-status"></div>
